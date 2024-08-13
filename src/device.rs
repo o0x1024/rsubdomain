@@ -3,22 +3,15 @@ use std::{
      net::IpAddr, process::Command, sync::mpsc::{Receiver, Sender}, thread::{self, JoinHandle}
 };
 use std::sync::mpsc;
-use pnet::datalink::MacAddr;
-use std::net::Ipv4Addr;
 use pnet::packet::ethernet::EthernetPacket;
 use rand::{thread_rng, Rng};
 use rand::distributions::Alphanumeric;
 use std::iter::repeat_with;
 
 use pnet::datalink::Channel::Ethernet;
+use crate::model::EthTable;
 
-#[derive(Debug)]
-pub struct EthTable {
-    src_ip: Ipv4Addr,
-    device: String,
-    src_mac: MacAddr,
-    dst_mac: MacAddr,
-}
+
 
 pub fn auto_get_devices() ->EthTable{
     let interfaces = datalink::interfaces();
@@ -99,7 +92,7 @@ pub fn auto_get_devices() ->EthTable{
 
     match mprx.recv() {
         Ok(eth) => {
-            println!("eth: {:?}", eth);
+            // println!("eth: {:?}", eth);
             eth
         },
         Err(e) => {
@@ -112,6 +105,7 @@ pub fn auto_get_devices() ->EthTable{
 // fn build_dns_packet() -> &[u8] {
     
 // }
+
 
 
 fn random_str(n: usize) -> String {
