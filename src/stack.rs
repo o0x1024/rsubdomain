@@ -1,21 +1,18 @@
-
-
-use std::sync::{Arc, Mutex};
-
-
+use std::sync::{Arc, Mutex, RwLock};
 
 #[derive(Debug)]
-struct Node<T> {
+pub struct Node<T> {
     data: T,
     next: Option<Arc<Mutex<Node<T>>>>,
 }
 
 #[derive(Debug)]
-struct Stack<T> {
+pub struct Stack<T> {
     head: Option<Arc<Mutex<Node<T>>>>,
-    length: usize,
+    pub length: usize,
 }
-impl<T: Clone> Stack<T> { // Add the Clone trait bound here
+impl<T: Clone> Stack<T> {
+    // Add the Clone trait bound here
     pub fn new() -> Self {
         Stack {
             head: None,
@@ -24,10 +21,7 @@ impl<T: Clone> Stack<T> { // Add the Clone trait bound here
     }
 
     pub fn push(&mut self, data: T) {
-        let new_node = Arc::new(Mutex::new(Node {
-            data,
-            next: None,
-        }));
+        let new_node = Arc::new(Mutex::new(Node { data, next: None }));
 
         if let Some(head) = self.head.as_ref() {
             new_node.lock().unwrap().next = Some(Arc::clone(head));
@@ -47,16 +41,15 @@ impl<T: Clone> Stack<T> { // Add the Clone trait bound here
             None
         }
     }
-
+    
+    #[allow(dead_code)]
     fn len(&self) -> usize {
         self.length
     }
 }
 
-
-
 use lazy_static::lazy_static;
 
 lazy_static! {
-    pub static ref LOCAL_STACK: Mutex<Stack<i32>> = Mutex::new(Stack::new());
+    pub static ref LOCAL_STACK: RwLock<Stack<usize>> = RwLock::new(Stack::new());
 }

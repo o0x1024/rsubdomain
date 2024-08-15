@@ -31,27 +31,47 @@ pub fn recv(device: String, flag_id: u16, retry_chan: mpsc::Sender<()>) {
                     if let Some(ipv4) = Ipv4Packet::new(ethernet.payload()) {
                         if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Udp {
                             if let Some(udp) = UdpPacket::new(ipv4.payload()) {
+                                let source = udp.get_source();
+                                if source != 53 {
+                                    continue;
+                                }
                                 let dns_payload = udp.payload();
                                 if let Some(dns) = DnsPacket::new(dns_payload) {
-                                    // 解析 DNS 查询
-                                    if dns.get_queries_raw().len() <= 0 {
-                                        continue;
+                                    
+                                    for query in dns.get_queries() {
+                                        println!("Found DNS query for: {}", String::from_utf8(query.qname).unwrap());
                                     }
 
-                                    if dns.get_id() / 100 == flag_id {
-                                        if dns.get_query_count() > 0 {
-                                            for query in dns.get_queries() {
-                                                let domain = query.get_qname_parsed();
-                                                println!("Found DNS query for: {}", domain);
-                                            }
-                                        }
+                                    println!("{:?}", dns.get_queries());
+
+                                    // 解析 DNS 查询
+                                    if dns.get_is_response() != 1 {
+                                        continue;
                                     }
+                                    println!("{:?}", dns);
+                                    // println!("{:?}", dns);
+
+                                    // for resp in dns.get_responses(){
+                                    //     println!("{:?}",resp.data.as_slice());
+                                    // }
+
+                                    // if dns.get_queries().len() <= 0 {
+                                    //     continue;
+                                    // }
+
+                                    // if dns.get_id() / 100 == flag_id {
+                                    //     if dns.get_query_count() > 0 {
+                                    //         for query in dns.get_queries() {
+                                    //             let domain = query.get_qname_parsed();
+                                    //             println!("Found DNS query for: {}", domain);
+                                    //         }
+                                    //     }
+                                    // }
                                 }
                             }
                         }
                     }
                 }
-                break;
             }
             Err(e) => {
                 println!(

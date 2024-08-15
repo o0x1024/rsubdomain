@@ -1,5 +1,6 @@
 use crate::model::{EthTable, StatusTable};
 use crate::stack::LOCAL_STACK;
+use crate::local_struct::LOCAL_STATUS;
 
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, DataLinkSender};
@@ -23,13 +24,14 @@ use std::sync::Mutex;
 
 // use crate::model::StatusTable;
 
+#[derive(Clone)]
 pub struct SendDog {
     ether: EthTable,
     dns: Vec<String>,
     handle: Rc<RefCell<Box<dyn DataLinkSender>>>,
     print_status: bool,
     index: u16,
-    lock: Mutex<()>,
+    lock: Rc<Mutex<()>>,
     increate_index: bool,
     flag_id: u16,
     flag_id2: u16,
@@ -61,12 +63,13 @@ impl SendDog {
         let default_dns: Vec<String>;
         if dns.len() == 0 {
             default_dns = vec![
-                "223.5.5.5".to_string(),
-                "223.6.6.6".to_string(),
-                "180.76.76.76".to_string(),
-                "119.29.29.29".to_string(),
-                "182.254.116.116".to_string(),
-                "114.114.114.115".to_string(),
+                "10.1.172.76".to_string(),
+                // "223.5.5.5".to_string(),
+                // "223.6.6.6".to_string(),
+                // "180.76.76.76".to_string(),
+                // "119.29.29.29".to_string(),
+                // "182.254.116.116".to_string(),
+                // "114.114.114.115".to_string(),
             ];
         } else {
             default_dns = dns;
@@ -79,23 +82,23 @@ impl SendDog {
             print_status,
             handle,
             index: 10000,
-            lock: Mutex::new(()),
+            lock: Mutex::new(()).into(),
             increate_index: true,
             flag_id2: 0,
         }
     }
 
-    pub fn chose_dns(&self) -> &String {
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..self.dns.len() - 1);
-        &self.dns[index]
+    pub fn chose_dns(&self) -> String {
+        // let mut rng = rand::thread_rng();
+        // let index = rng.gen_range(0..self.dns.len() - 1);
+        self.dns[0].to_owned()
     }
 
     pub fn send(&self, domain: String, dnsname: String, src_port: u16, flag_id: u16) {
-        let dns_query: Vec<u8> = build_dns(domain.as_str(), flag_id);
+        let dns_query: Vec<u8> = build_dns_query(domain.as_str(), flag_id);
         let dns_query_len = dns_query.len();
-        let ipv4_source: Ipv4Addr = Ipv4Addr::new(192, 168, 11, 129);
-        let ipv4_destination: Ipv4Addr = Ipv4Addr::new(8, 8, 8, 8);
+        let ipv4_source: Ipv4Addr = self.ether.src_ip;
+        let ipv4_destination: Ipv4Addr = dnsname.parse().unwrap();
 
         // IP Header 中不包含选项
         let ipv4_header_len = 20;
@@ -150,7 +153,7 @@ impl SendDog {
         };
 
         match res {
-            Some(Ok(())) => println!("Packet sent successfully"),
+            Some(Ok(())) => (),
             Some(Err(e)) => println!("Failed to send packet: {}", e),
             None => println!("No destination interface specified"),
         }
@@ -158,7 +161,7 @@ impl SendDog {
 
     pub fn build_status_table(&mut self, domain: &str, dns: &str, domain_level: isize) -> (u16, u16) {
         let _lock = self.lock.lock().unwrap(); // 锁定
-        let mut stack = LOCAL_STACK.lock().unwrap();
+        let mut stack = LOCAL_STACK.write().unwrap();
         if self.index >= 60000 {
             self.flag_id2 += 1;
             self.index = 10000;
@@ -188,11 +191,13 @@ impl SendDog {
         let status = StatusTable {
             domain: domain.to_string(),
             dns: dns.to_string(),
-            time: chrono::Utc::now().timestamp(), // 使用 chrono crate 获取当前时间
+            time: chrono::Utc::now().timestamp() as u64, // 使用 chrono crate 获取当前时间
             retry: 0,
             domain_level,
         };
-        local_status_append(&status, index as u32);
+
+        let mut local_status = LOCAL_STATUS.write().unwrap();
+        local_status.append(status, index as u32);
         (self.flag_id2, self.index)
     }
 }
@@ -203,33 +208,69 @@ fn generate_map_index(flag_id2: u16, index: u16) -> i32 {
 }
 
 
-fn generate_flag_index_from_map(index: i32) -> (u16, u16) {
+fn generate_flag_index_from_map(index: usize) -> (u16, u16) {
     // 从已经生成好的 map index 中返回 flag_id 和 index
-    let yuzhi: i32 = 60000;
+    let yuzhi: usize = 60000;
     let flag2 = index / yuzhi;
     let index2 = index % yuzhi;
     (flag2 as u16, index2 as u16)
 }
 
-fn build_dns(domain: &str, flag_id: u16) -> Vec<u8> {
-    let mut dns_buffer = [0u8; 14];
-    let mut dns_packet = MutableDnsPacket::new(&mut dns_buffer).unwrap();
-    dns_packet.set_id(flag_id);
-    dns_packet.set_is_response(0);
-    dns_packet.set_opcode(Opcode::new(0));
-    dns_packet.set_is_truncated(0);
-    dns_packet.set_is_recursion_desirable(0);
-    dns_packet.set_zero_reserved(0);
-    dns_packet.set_is_non_authenticated_data(0);
-    dns_packet.set_additional_rr_count(0);
-    dns_packet.set_authority_rr_count(0);
-    dns_packet.set_is_answer_authenticated(0);
 
-    dns_packet.set_queries(&[DnsQuery {
-        qname: domain.as_bytes().to_vec(),
-        qtype: DnsTypes::A,
-        qclass: DnsClasses::IN,
-        payload: Vec::new(),
-    }]);
-    dns_packet.packet().to_vec()
+fn build_dns_query(domain: &str, flag_id: u16) -> Vec<u8> {
+    let mut buffer = Vec::new();
+
+    // DNS Header
+    buffer.push((flag_id >> 8) as u8); // 高8位
+    buffer.push(flag_id as u8); // 低8位
+    // buffer.extend_from_slice(&[0x33, 0x01]); // Transaction ID
+    buffer.extend_from_slice(&[0x01, 0x00]); // Flags (standard query)
+    buffer.extend_from_slice(&[0x00, 0x01]); // Questions
+    buffer.extend_from_slice(&[0x00, 0x00]); // Answer RRs
+    buffer.extend_from_slice(&[0x00, 0x00]); // Authority RRs
+    buffer.extend_from_slice(&[0x00, 0x00]); // Additional RRs
+
+    for label in domain.split('.') {
+        buffer.push(label.len() as u8);
+        buffer.extend_from_slice(label.as_bytes());
+    }
+
+    buffer.extend_from_slice(&[0x00]); // Null terminator for the domain name
+
+    // Type and Class
+    buffer.extend_from_slice(&[0x00, 0x01]); // Type A
+    buffer.extend_from_slice(&[0x00, 0x01]); // Class IN
+
+    buffer
 }
+
+
+// fn build_dns_query(domain: &str, flag_id: u16) -> Vec<u8> {
+//     let mut buffer = vec![0; 512];
+//     let mut dns_packet = MutableDnsPacket::new(&mut buffer ).unwrap();
+//     dns_packet.set_id(flag_id);
+//     dns_packet.set_is_response(0);
+//     dns_packet.set_opcode(Opcode::new(0));
+//     dns_packet.set_is_truncated(0);
+//     dns_packet.set_is_recursion_desirable(0);
+//     dns_packet.set_zero_reserved(0);
+//     dns_packet.set_is_non_authenticated_data(0);
+//     dns_packet.set_additional_rr_count(0);
+//     dns_packet.set_authority_rr_count(0);
+//     dns_packet.set_is_answer_authenticated(0);
+
+
+
+//     let query1 = DnsQuery {
+//         qname: domain.as_bytes().to_vec(),
+//         qtype: DnsTypes::A,
+//         qclass: DnsClasses::IN,
+//         payload: Vec::new(),
+//     };
+
+//     let queries = &[query1];
+
+//     dns_packet.set_queries(queries);
+    
+//     dns_packet.packet().to_vec()
+// }

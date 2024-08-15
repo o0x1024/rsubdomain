@@ -1,7 +1,7 @@
 
 use rsubdomain::device;
 
-fn main() {
+#[tokio::main]
+async  fn main() {
     device::auto_get_devices();
-
 }
