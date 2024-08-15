@@ -39,16 +39,15 @@ pub fn recv(device: String, flag_id: u16, retry_chan: mpsc::Sender<()>) {
                                 if let Some(dns) = DnsPacket::new(dns_payload) {
                                     
                                     for query in dns.get_queries() {
-                                        println!("Found DNS query for: {}", String::from_utf8(query.qname).unwrap());
+                                        println!("Found DNS query for: {}", query.get_qname_parsed());
                                     }
 
-                                    println!("{:?}", dns.get_queries());
-
+                                    // println!("{:?}", dns.get_queries());
                                     // 解析 DNS 查询
                                     if dns.get_is_response() != 1 {
                                         continue;
                                     }
-                                    println!("{:?}", dns);
+                                    // println!("{:?}", dns);
                                     // println!("{:?}", dns);
 
                                     // for resp in dns.get_responses(){

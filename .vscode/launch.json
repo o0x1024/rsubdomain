@@ -63,6 +63,25 @@
             },
             "args": [],
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug send packet",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=rsubdomain",
+                    "--package=rsubdomain"
+                ],
+                "filter": {
+                    "name": "rsubdomain",
+                    "kind": "bin"
+                }
+            },
+            "args": ["--example","send_packet"],
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

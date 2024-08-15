@@ -26,6 +26,7 @@ pub fn auto_get_devices() -> EthTable {
     let (mptx, mprx): (Sender<EthTable>, Receiver<EthTable>) = mpsc::channel();
     let domain = random_str(4) + ".example.com";
 
+    println!("test domain:{}",domain);
     for interface in interfaces {
         if !interface.is_loopback() {
             for ip in interface.ips.clone() {

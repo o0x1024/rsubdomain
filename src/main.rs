@@ -19,7 +19,7 @@ async fn main() {
     println!("{:?}", opts.domain);
 
     let ether = device::auto_get_devices();
-    print!("{:?}", ether);
+    println!("{:?}", ether);
 
     sleep(Duration::from_millis(500));
     let mut rng = rand::thread_rng();
