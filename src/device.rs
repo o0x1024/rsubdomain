@@ -1,4 +1,6 @@
 use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ipv6::Ipv6Packet;
+use pnet::transport::icmpv6_packet_iter;
 use pnet::{
     datalink,
     packet::{
@@ -23,10 +25,15 @@ use tokio::time::Duration;
 
 pub fn auto_get_devices() -> EthTable {
     let interfaces = datalink::interfaces();
+
+    // for iface in interfaces.clone(){
+    //     println!("{:?}",iface);
+    // }
+
     let (mptx, mprx): (Sender<EthTable>, Receiver<EthTable>) = mpsc::channel();
     let domain = random_str(4) + ".example.com";
 
-    println!("test domain:{}",domain);
+    println!("test domain:{}", domain);
     for interface in interfaces {
         if !interface.is_loopback() {
             for ip in interface.ips.clone() {
@@ -56,13 +63,17 @@ pub fn auto_get_devices() -> EthTable {
                                                     Ipv4Packet::new(ethernet.payload()).unwrap();
                                                 match ipv4_packet.get_next_level_protocol() {
                                                     IpNextHeaderProtocols::Udp => {
-                                                        let udp_packet = UdpPacket::new(ipv4_packet.payload()).unwrap();
+                                                        let udp_packet =
+                                                            UdpPacket::new(ipv4_packet.payload())
+                                                                .unwrap();
 
-                                                        if udp_packet.get_source() != 53{
+                                                        if udp_packet.get_source() != 53 {
                                                             continue;
                                                         }
-                                                        
-                                                        if let Some(dns) =DnsPacket::new(udp_packet.payload()){
+
+                                                        if let Some(dns) =
+                                                            DnsPacket::new(udp_packet.payload())
+                                                        {
                                                             for query in dns.get_queries() {
                                                                 let recv_domain =
                                                                     query.get_qname_parsed();
@@ -93,7 +104,56 @@ pub fn auto_get_devices() -> EthTable {
                                                     _ => (),
                                                 }
                                             }
-                                            _ => (),
+                                            EtherTypes::Ipv6 => {
+                                                let ipv6_packet =
+                                                    Ipv6Packet::new(ethernet.payload());
+                                                if let Some(header) = ipv6_packet {
+                                                    match header.get_next_header() {
+                                                        IpNextHeaderProtocols::Udp => {
+                                                            let udp_packet =
+                                                                UdpPacket::new(header.payload())
+                                                                    .unwrap();
+
+                                                            if udp_packet.get_source() != 53 {
+                                                                continue;
+                                                            }
+
+                                                            if let Some(dns) =
+                                                                DnsPacket::new(udp_packet.payload())
+                                                            {
+                                                                for query in dns.get_queries() {
+                                                                    let recv_domain =
+                                                                        query.get_qname_parsed();
+                                                                    if recv_domain
+                                                                        .contains(&domain_clone)
+                                                                    {
+                                                                        println!("auto_get_device get domain:{}",recv_domain);
+                                                                        let ipv4 = match ip.ip() {
+                                                                        IpAddr::V4(addr) => addr,
+                                                                        IpAddr::V6(_) => panic!("Expected an IPv4 address, got an IPv6 address"),
+                                                                    };
+                                                                        if let Err(err) = mptx_clone
+                                                                        .send(EthTable {
+                                                                            src_ip: ipv4,
+                                                                            device: interface_name,
+                                                                            src_mac: ethernet
+                                                                                .get_destination(),
+                                                                            dst_mac: ethernet
+                                                                                .get_source(),
+                                                                        })
+                                                                    {
+                                                                        println!("An error occurred when sending the message: {}", err);
+                                                                    }
+                                                                        return;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        _ => (),
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
                                         }
                                     }
                                     Err(e) => {
