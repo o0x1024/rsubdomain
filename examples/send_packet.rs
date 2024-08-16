@@ -3,17 +3,19 @@ use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
 use pnet::packet::icmp::echo_reply::IcmpCodes;
 use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet::packet::icmp::IcmpTypes;
+use pnet::packet::ipv4::Ipv4Flags::DontFragment;
 use pnet::packet::ipv4::MutableIpv4Packet;
 use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket};
 use pnet::packet::{ip::IpNextHeaderProtocols, util, Packet};
+
 use pnet::util::MacAddr;
+
 use rsubdomain::device;
 use rsubdomain::model::EthTable;
 
 use std::net::Ipv4Addr;
 
 use pnet::datalink::Channel::Ethernet;
-
 
 #[tokio::main]
 async fn main() {
@@ -24,16 +26,16 @@ async fn main() {
     if flg == 1 {
         send_by_tranport();
     } else if flg == 2 {
-        send_by_datalink(ether,"8.8.8.8");
+        send_by_datalink(ether, "8.8.8.8");
     } else {
-        send_icmp_datalink();
+        send_icmp_datalink(ether, "172.31.36.33");
     }
 
     // println!("DNS query sent!");
 }
 const ICMP_SIZE: usize = 40;
 
-fn send_by_datalink(ether: EthTable, dnsname: &str) {
+fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     let interfaces = datalink::interfaces();
 
     let interface = interfaces
@@ -45,7 +47,7 @@ fn send_by_datalink(ether: EthTable, dnsname: &str) {
     let dns_query_len = dns_query.len();
 
     let ipv4_source: Ipv4Addr = ether.src_ip;
-    let ipv4_destination: Ipv4Addr = dnsname.parse().unwrap();
+    let ipv4_destination: Ipv4Addr = dst_ip.parse().unwrap();
 
     let ipv4_header_len = 20;
     let udp_header_len = 8;
@@ -55,6 +57,7 @@ fn send_by_datalink(ether: EthTable, dnsname: &str) {
     let mut ethernet_buffer = [0u8; 14];
     let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
     ethernet_packet.set_destination(ether.dst_mac);
+    // ethernet_packet.set_destination(MacAddr(0xb0,0x7b,0x25,0x24,0x95,0x49));
     ethernet_packet.set_source(interface.mac.unwrap());
     ethernet_packet.set_ethertype(EtherTypes::Ipv4);
 
@@ -65,7 +68,7 @@ fn send_by_datalink(ether: EthTable, dnsname: &str) {
     ipv4_packet.set_dscp(0);
     ipv4_packet.set_ecn(0);
     ipv4_packet.set_total_length(total_length);
-    ipv4_packet.set_identification(55346);
+    ipv4_packet.set_identification(5636);
     ipv4_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
 
     ipv4_packet.set_flags(0);
@@ -193,30 +196,19 @@ fn build_dns_query(domain: &str) -> Vec<u8> {
 
     // buffer.extend_from_slice(&[0x00,0x00 ,0x29 ,0x05 ,0xc0 ,0x00 ,0x00 ,0x00 ,0x00 ,0x00 ,0x00]); // Class IN
 
-
     buffer
 }
 
-fn send_icmp_datalink() {
+fn send_icmp_datalink(ether: EthTable, dst_ip: &str) {
     let interfaces = datalink::interfaces();
-
-    for interface in interfaces.iter() {
-        if interface.name == "enp1s0" {
-            println!("Name: {}", interface.name);
-            println!("Index: {}", interface.index);
-            println!("MAC Address: {:?}", interface.mac);
-            println!("IP Addresses: {:?}", interface.ips);
-            println!("Flags: {:?}", interface.flags);
-        }
-    }
 
     let interface = interfaces
         .iter()
-        .find(|iface| iface.name == "enp1s0" && !iface.is_loopback())
+        .find(|iface| iface.name == ether.device && !iface.is_loopback())
         .expect("No suitable network interface found");
 
-    let ipv4_source: Ipv4Addr = Ipv4Addr::new(172, 31, 36, 23);
-    let icmp_destination: Ipv4Addr = Ipv4Addr::new(59, 111, 160, 244);
+    let ipv4_source: Ipv4Addr = ether.src_ip;
+    let icmp_destination: Ipv4Addr = dst_ip.parse().unwrap();
 
     // IP Header 中不包含选项
     let ipv4_header_len = 20;
@@ -227,7 +219,9 @@ fn send_icmp_datalink() {
 
     let mut ethernet_buffer = [0u8; 14];
     let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
-    ethernet_packet.set_destination(MacAddr::new(0x68, 0xa8, 0x28, 0x2f, 0xd7, 0x07));
+    // ethernet_packet.set_destination(MacAddr::new(0x68, 0xa8, 0x28, 0x2f, 0xd7, 0x07));
+    ethernet_packet.set_destination(MacAddr(0xb0, 0x7b, 0x25, 0x24, 0x95, 0x49));
+
     ethernet_packet.set_source(interface.mac.unwrap());
     ethernet_packet.set_ethertype(EtherTypes::Ipv4);
     println!("{:?}", ethernet_packet);
@@ -242,7 +236,7 @@ fn send_icmp_datalink() {
     ipv4_packet.set_identification(14599);
     ipv4_packet.set_next_level_protocol(IpNextHeaderProtocols::Icmp);
 
-    ipv4_packet.set_flags(0);
+    ipv4_packet.set_flags(DontFragment);
     ipv4_packet.set_fragment_offset(0);
     ipv4_packet.set_source(ipv4_source);
     ipv4_packet.set_destination(icmp_destination);
