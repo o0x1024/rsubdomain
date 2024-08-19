@@ -1,12 +1,13 @@
 use pnet::datalink;
 use pnet::packet::dns::MutableDnsPacket;
 use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
+use pnet::packet::gre::U16BE;
 use pnet::packet::icmp::echo_reply::IcmpCodes;
 use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet::packet::icmp::IcmpTypes;
 use pnet::packet::ipv4::Ipv4Flags::{self, DontFragment};
 use pnet::packet::ipv4:: MutableIpv4Packet;
-use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket};
+use pnet::packet::udp::{self, ipv4_checksum, MutableUdpPacket};
 use pnet::packet::{ip::IpNextHeaderProtocols, util, Packet};
 use pnet::transport::{transport_channel, TransportProtocol};
 use pnet::transport::TransportChannelType::Layer4;
@@ -16,6 +17,7 @@ use pnet::util::MacAddr;
 use rsubdomain::device;
 use rsubdomain::model::EthTable;
 
+use std::borrow::BorrowMut;
 use std::net::Ipv4Addr;
 
 use pnet::datalink::Channel::Ethernet;
@@ -51,7 +53,7 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
         .find(|iface| iface.name == ether.device && !iface.is_loopback())
         .expect("No suitable network interface found");
 
-    let dns_query: Vec<u8> = build_dns_query("1Ui6.example.com");
+    let dns_query: Vec<u8> = build_dns_query("1Uixxx6.example.com");
     let dns_query_len = dns_query.len();
 
     let ipv4_source: Ipv4Addr = ether.src_ip;
@@ -75,7 +77,7 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
 
     let mut ipv4_buffer = [0u8; 20];
     let mut ipv4_header = MutableIpv4Packet::new(&mut ipv4_buffer).unwrap();
-    ipv4_header.set_header_length(69);
+    ipv4_header.set_header_length(5);
     ipv4_header.set_total_length(total_length);
     ipv4_header.set_next_level_protocol(IpNextHeaderProtocols::Udp);
     ipv4_header.set_source(ipv4_source);
