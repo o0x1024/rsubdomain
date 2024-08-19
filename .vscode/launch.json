@@ -38,7 +38,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-d","imgo.tv"],
+            "args": ["-d","example.com"],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_BACKTRACE": "1"
@@ -70,8 +70,9 @@
             "name": "Debug send packet",
             "cargo": {
                 "args": [
-                    "test",
-                    "--no-run",
+
+                    
+                    "run",
                     "--bin=rsubdomain",
                     "--package=rsubdomain"
                 ],

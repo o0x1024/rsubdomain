@@ -16,12 +16,11 @@ use std::{
     net::IpAddr,
     process::Command,
     sync::mpsc::{Receiver, Sender},
-    thread::{self, JoinHandle},
+    
 };
 
 use crate::model::EthTable;
 use pnet::datalink::Channel::Ethernet;
-use tokio::time::Duration;
 
 pub fn auto_get_devices() -> EthTable {
     let interfaces = datalink::interfaces();
@@ -35,7 +34,7 @@ pub fn auto_get_devices() -> EthTable {
 
     println!("test domain:{}", domain);
     for interface in interfaces {
-        if !interface.is_loopback() {
+        if !interface.is_loopback(){
             for ip in interface.ips.clone() {
                 match ip.ip() {
                     IpAddr::V4(_) => {

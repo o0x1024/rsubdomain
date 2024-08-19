@@ -12,7 +12,6 @@ use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
 use pnet::packet::ipv4::MutableIpv4Packet;
 use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket};
 use pnet::packet::{ip::IpNextHeaderProtocols, Packet};
-use rand::Rng;
 use std::cell::RefCell;
 use std::time::Duration;
 use std::{i32, thread};
@@ -63,13 +62,13 @@ impl SendDog {
         let default_dns: Vec<String>;
         if dns.len() == 0 {
             default_dns = vec![
-                "10.1.172.76".to_string(),
-                // "223.5.5.5".to_string(),
-                // "223.6.6.6".to_string(),
-                // "180.76.76.76".to_string(),
-                // "119.29.29.29".to_string(),
-                // "182.254.116.116".to_string(),
-                // "114.114.114.115".to_string(),
+                // "10.1.172.76".to_string(),
+                "223.5.5.5".to_string(),
+                "223.6.6.6".to_string(),
+                "180.76.76.76".to_string(),
+                "119.29.29.29".to_string(),
+                "182.254.116.116".to_string(),
+                "114.114.114.115".to_string(),
             ];
         } else {
             default_dns = dns;
