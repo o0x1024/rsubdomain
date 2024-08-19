@@ -1,12 +1,13 @@
 use pnet::datalink;
 use pnet::packet::dns::MutableDnsPacket;
 use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
+use pnet::packet::gre::U16BE;
 use pnet::packet::icmp::echo_reply::IcmpCodes;
 use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet::packet::icmp::IcmpTypes;
 use pnet::packet::ipv4::Ipv4Flags::{self, DontFragment};
 use pnet::packet::ipv4:: MutableIpv4Packet;
-use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket};
+use pnet::packet::udp::{self, ipv4_checksum, MutableUdpPacket};
 use pnet::packet::{ip::IpNextHeaderProtocols, util, Packet};
 use pnet::transport::{transport_channel, TransportProtocol};
 use pnet::transport::TransportChannelType::Layer4;
@@ -16,6 +17,7 @@ use pnet::util::MacAddr;
 use rsubdomain::device;
 use rsubdomain::model::EthTable;
 
+use std::borrow::BorrowMut;
 use std::net::Ipv4Addr;
 
 use pnet::datalink::Channel::Ethernet;
@@ -30,7 +32,7 @@ async fn main() {
     if flg == 1 {
         send_by_tranport();
     } else if flg == 2 {
-        send_by_datalink(ether, "10.1.172.76");
+        send_by_datalink(ether, "8.8.8.8");
     } else {
         send_icmp_datalink(ether, "172.31.36.33");
     }
@@ -58,16 +60,24 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
 
     let total_length: u16 = (ipv4_header_len + udp_header_len + dns_query_len) as _;
 
-    let mut ethernet_buffer = [0u8; 14];
-    let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
-    ethernet_packet.set_destination(ether.dst_mac);
-    // ethernet_packet.set_destination(MacAddr(0xb0,0x7b,0x25,0x24,0x95,0x49));
-    ethernet_packet.set_source(interface.mac.unwrap());
-    ethernet_packet.set_ethertype(EtherTypes::Ipv4);
+
+
+    let mut udp_buffer: Vec<u8> = vec![0u8; 8];
+    let mut udp_header = MutableUdpPacket::new(&mut udp_buffer).unwrap();
+    udp_header.set_source(rand::random::<u16>());
+    udp_header.set_destination(53);
+    udp_header.set_length(8 + dns_query.len() as u16);
+
+
+    println!("source:{},destination:{}",ipv4_source,ipv4_destination);
+    let udpchecksum = udp::ipv4_checksum(&udp_header.to_immutable(), &ipv4_source,&ipv4_destination);
+    udp_header.set_checksum(udpchecksum);
+
+
 
     let mut ipv4_buffer = [0u8; 20];
     let mut ipv4_header = MutableIpv4Packet::new(&mut ipv4_buffer).unwrap();
-    ipv4_header.set_header_length(69);
+    ipv4_header.set_header_length(5);
     ipv4_header.set_total_length(total_length);
     ipv4_header.set_next_level_protocol(IpNextHeaderProtocols::Udp);
     ipv4_header.set_source(ipv4_source);
@@ -79,13 +89,14 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     let checksum = pnet::packet::ipv4::checksum(&ipv4_header.to_immutable());
     ipv4_header.set_checksum(checksum);
 
-    let mut udp_buffer: Vec<u8> = vec![0u8; 8];
-    let mut udp_header = MutableUdpPacket::new(&mut udp_buffer).unwrap();
-    udp_header.set_source(rand::random::<u16>());
-    udp_header.set_destination(53);
-    udp_header.set_length(8 + dns_query.len() as u16);
-    let udpchecksum = ipv4_checksum(&udp_header.to_immutable(), &ipv4_source, &ipv4_destination);
-    udp_header.set_checksum(0);
+
+
+    let mut ethernet_buffer = [0u8; 14];
+    let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
+    ethernet_packet.set_destination(ether.dst_mac);
+    // ethernet_packet.set_destination(MacAddr(0xb0,0x7b,0x25,0x24,0x95,0x49));
+    ethernet_packet.set_source(interface.mac.unwrap());
+    ethernet_packet.set_ethertype(EtherTypes::Ipv4);
 
 
     println!("dns_query_len:{}",dns_query.len());
