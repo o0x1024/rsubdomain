@@ -47,7 +47,7 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
         .find(|iface| iface.name == ether.device && !iface.is_loopback())
         .expect("No suitable network interface found");
 
-    let dns_query: Vec<u8> = build_dns_query("1Ui6.example.com");
+    let dns_query: Vec<u8> = build_dns_query("1Uixxx6.example.com");
     let dns_query_len = dns_query.len();
 
     let ipv4_source: Ipv4Addr = ether.src_ip;
@@ -84,8 +84,8 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     udp_header.set_source(rand::random::<u16>());
     udp_header.set_destination(53);
     udp_header.set_length(8 + dns_query.len() as u16);
-    let checksum = ipv4_checksum(&udp_header.to_immutable(), &ipv4_source, &ipv4_destination);
-    udp_header.set_checksum(checksum);
+    let udpchecksum = ipv4_checksum(&udp_header.to_immutable(), &ipv4_source, &ipv4_destination);
+    udp_header.set_checksum(0);
 
 
     println!("dns_query_len:{}",dns_query.len());
