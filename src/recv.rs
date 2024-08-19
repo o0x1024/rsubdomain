@@ -1,6 +1,6 @@
 use pnet::datalink;
 use pnet::datalink::Channel::Ethernet;
-use pnet::packet::dns::DnsPacket;
+use pnet::packet::dns::{DnsPacket, DnsResponsePacket, DnsType, DnsTypes, Retcode};
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::udp::UdpPacket;
@@ -24,6 +24,7 @@ pub fn recv(device: String, flag_id: u16, retry_chan: mpsc::Sender<()>) {
         ),
     };
 
+    let mut count: i32 = 0;
     loop {
         match rx.next() {
             Ok(packet) => {
@@ -37,16 +38,28 @@ pub fn recv(device: String, flag_id: u16, retry_chan: mpsc::Sender<()>) {
                                 }
                                 let dns_payload = udp.payload();
                                 if let Some(dns) = DnsPacket::new(dns_payload) {
-                                    
-                                    for query in dns.get_queries() {
-                                        println!("Found DNS query for: {}", query.get_qname_parsed());
+                                    let is_response = dns.get_is_response();
+                                    let rtcode = dns.get_rcode();
+                                    if is_response == 0x1 && rtcode == Retcode::NoError {
+                                        count += 1;
+                                        let mut query_name = String::new();
+                                        for query in dns.get_queries() {
+                                            println!("{} ", query.get_qname_parsed());
+                                            query_name.push_str(query.get_qname_parsed().as_str())
+                                        }
+                                        for res in dns.get_responses() {
+                                            if res.rtype == DnsTypes::A {
+                                                println!("{} -> {:?}",query_name, res.data);
+                                            }
+                                        }
+                                        println!("{} ", count);
+                                       
                                     }
+                                    // println!("{} ", count);
 
                                     // println!("{:?}", dns.get_queries());
                                     // 解析 DNS 查询
-                                    if dns.get_is_response() != 1 {
-                                        continue;
-                                    }
+
                                     // println!("{:?}", dns);
                                     // println!("{:?}", dns);
 

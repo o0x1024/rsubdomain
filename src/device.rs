@@ -1,6 +1,5 @@
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ipv6::Ipv6Packet;
-use pnet::transport::icmpv6_packet_iter;
 use pnet::{
     datalink,
     packet::{

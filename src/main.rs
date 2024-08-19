@@ -35,6 +35,7 @@ async fn main() {
     let senddog: SendDog = SendDog::new(ether, opts.resolvers, flag_id, true);
     let sub_domain_list = get_default_sub_next_data();
 
+    println!("subdomain count:{}",sub_domain_list.as_ref().len());
     for sub in *sub_domain_list {
         for _domain in opts.domain.clone() {
             let mut send_dog_clone = senddog.clone();
@@ -44,7 +45,7 @@ async fn main() {
             final_domain = final_domain + &_domain;
             let dns_name = senddog.chose_dns();
             let (flagid2, scr_port) = send_dog_clone.build_status_table(final_domain.as_str(), dns_name.as_str(), 1);
-            send_dog_clone.send(final_domain, dns_name, scr_port, 500)
+            send_dog_clone.send(final_domain, dns_name, scr_port, flagid2)
         }
     }
 

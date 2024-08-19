@@ -1,25 +1,21 @@
+use crate::local_struct::LOCAL_STATUS;
 use crate::model::{EthTable, StatusTable};
 use crate::stack::LOCAL_STACK;
-use crate::local_struct::LOCAL_STATUS;
 
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, DataLinkSender};
-use pnet::packet::dns::{
-    DnsClasses, DnsQuery, DnsTypes, MutableDnsPacket,
-    Opcode,
-};
+use pnet::packet::dns::{DnsClasses, DnsQuery, DnsTypes, MutableDnsPacket, Opcode};
 use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
-use pnet::packet::ipv4::MutableIpv4Packet;
+use pnet::packet::ipv4::{Ipv4Flags, MutableIpv4Packet};
 use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket};
 use pnet::packet::{ip::IpNextHeaderProtocols, Packet};
 use std::cell::RefCell;
-use std::time::Duration;
-use std::{i32, thread};
 use std::net::Ipv4Addr;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Mutex;
-
+use std::time::Duration;
+use std::{i32, thread};
 
 // use crate::model::StatusTable;
 
@@ -38,9 +34,6 @@ pub struct SendDog {
 
 impl SendDog {
     pub fn new(ether: EthTable, dns: Vec<String>, flag_id: u16, print_status: bool) -> SendDog {
-
-
-        
         let interfaces = datalink::interfaces();
 
         let interface = interfaces
@@ -99,12 +92,30 @@ impl SendDog {
         let ipv4_source: Ipv4Addr = self.ether.src_ip;
         let ipv4_destination: Ipv4Addr = dnsname.parse().unwrap();
 
-        // IP Header 中不包含选项
         let ipv4_header_len = 20;
-        // TCP Header 中不包含选项，比如 TSVal 等
         let udp_header_len = 8;
-
         let total_length: u16 = (ipv4_header_len + udp_header_len + dns_query_len) as _;
+
+        let mut udp_buffer: Vec<u8> = Vec::with_capacity(udp_header_len + dns_query_len);
+        udp_buffer.resize(8 + dns_query_len, 0u8);
+
+        let mut udp_header = MutableUdpPacket::new(&mut udp_buffer).unwrap();
+        udp_header.set_source(rand::random::<u16>());
+        udp_header.set_destination(53);
+        udp_header.set_length(udp_header_len as u16 + dns_query_len as u16);
+        udp_header.set_payload(&dns_query);
+
+        let mut ipv4_buffer = [0u8; 20];
+        let mut ipv4_header = MutableIpv4Packet::new(&mut ipv4_buffer).unwrap();
+        ipv4_header.set_header_length(69);
+        ipv4_header.set_total_length(total_length);
+        ipv4_header.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+        ipv4_header.set_source(ipv4_source);
+        ipv4_header.set_destination(ipv4_destination);
+        ipv4_header.set_identification(5636);
+        ipv4_header.set_ttl(64);
+        ipv4_header.set_version(4);
+        ipv4_header.set_flags(Ipv4Flags::DontFragment);
 
         let mut ethernet_buffer = [0u8; 14];
         let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
@@ -112,43 +123,21 @@ impl SendDog {
         ethernet_packet.set_source(self.ether.src_mac);
         ethernet_packet.set_ethertype(EtherTypes::Ipv4);
 
-        let mut ipv4_buffer = [0u8; 20];
-        let mut ipv4_packet = MutableIpv4Packet::new(&mut ipv4_buffer).unwrap();
-        ipv4_packet.set_version(4);
-        ipv4_packet.set_header_length(5);
-        ipv4_packet.set_dscp(1);
-        ipv4_packet.set_ecn(0);
-        ipv4_packet.set_total_length(total_length);
-        ipv4_packet.set_identification(21482);
-        ipv4_packet.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+        let checksum = pnet::packet::ipv4::checksum(&ipv4_header.to_immutable());
+        ipv4_header.set_checksum(checksum);
 
-        ipv4_packet.set_flags(0);
-        ipv4_packet.set_fragment_offset(0);
-        ipv4_packet.set_source(ipv4_source);
-        ipv4_packet.set_destination(Ipv4Addr::from_str(dnsname.as_str()).unwrap());
-        ipv4_packet.set_ttl(200);
-        ipv4_packet.set_checksum(0);
-
-        let mut udp_buffer: Vec<u8> = vec![0u8; 8];
-        let mut udp_packet = MutableUdpPacket::new(&mut udp_buffer).unwrap();
-        udp_packet.set_source(src_port);
-        udp_packet.set_destination(53);
-        udp_packet.set_length(8 + dns_query.len() as u16);
-        let um_checksum =
-            ipv4_checksum(&udp_packet.to_immutable(), &ipv4_source, &ipv4_destination);
-        udp_packet.set_checksum(um_checksum);
-        // udp_packet.set_checksum(0xe088);
+        let checksum = ipv4_checksum(&udp_header.to_immutable(), &ipv4_source, &ipv4_destination);
+        udp_header.set_checksum(checksum);
 
         let mut final_packet = Vec::new();
         final_packet.extend_from_slice(ethernet_packet.packet());
-        final_packet.extend_from_slice(ipv4_packet.packet());
-        final_packet.extend_from_slice(udp_packet.packet());
-        final_packet.extend_from_slice(&dns_query);
+        final_packet.extend_from_slice(ipv4_header.packet());
+        final_packet.extend_from_slice(udp_header.packet());
 
+        
         let res = {
             let mut handle = self.handle.borrow_mut();
             handle.send_to(&final_packet, None)
-            // self.handle.send_to(&final_packet, None);
         };
 
         match res {
@@ -158,7 +147,12 @@ impl SendDog {
         }
     }
 
-    pub fn build_status_table(&mut self, domain: &str, dns: &str, domain_level: isize) -> (u16, u16) {
+    pub fn build_status_table(
+        &mut self,
+        domain: &str,
+        dns: &str,
+        domain_level: isize,
+    ) -> (u16, u16) {
         let _lock = self.lock.lock().unwrap(); // 锁定
         let mut stack = LOCAL_STACK.write().unwrap();
         if self.index >= 60000 {
@@ -206,7 +200,6 @@ fn generate_map_index(flag_id2: u16, index: u16) -> i32 {
     (flag_id2 as i32 * 60000) + (index as i32)
 }
 
-
 fn generate_flag_index_from_map(index: usize) -> (u16, u16) {
     // 从已经生成好的 map index 中返回 flag_id 和 index
     let yuzhi: usize = 60000;
@@ -215,14 +208,13 @@ fn generate_flag_index_from_map(index: usize) -> (u16, u16) {
     (flag2 as u16, index2 as u16)
 }
 
-
 fn build_dns_query(domain: &str, flag_id: u16) -> Vec<u8> {
     let mut buffer = Vec::new();
 
     // DNS Header
     buffer.push((flag_id >> 8) as u8); // 高8位
     buffer.push(flag_id as u8); // 低8位
-    // buffer.extend_from_slice(&[0x33, 0x01]); // Transaction ID
+                                // buffer.extend_from_slice(&[0x33, 0x01]); // Transaction ID
     buffer.extend_from_slice(&[0x01, 0x00]); // Flags (standard query)
     buffer.extend_from_slice(&[0x00, 0x01]); // Questions
     buffer.extend_from_slice(&[0x00, 0x00]); // Answer RRs
@@ -243,7 +235,6 @@ fn build_dns_query(domain: &str, flag_id: u16) -> Vec<u8> {
     buffer
 }
 
-
 // fn build_dns_query(domain: &str, flag_id: u16) -> Vec<u8> {
 //     let mut buffer = vec![0; 512];
 //     let mut dns_packet = MutableDnsPacket::new(&mut buffer ).unwrap();
@@ -258,8 +249,6 @@ fn build_dns_query(domain: &str, flag_id: u16) -> Vec<u8> {
 //     dns_packet.set_authority_rr_count(0);
 //     dns_packet.set_is_answer_authenticated(0);
 
-
-
 //     let query1 = DnsQuery {
 //         qname: domain.as_bytes().to_vec(),
 //         qtype: DnsTypes::A,
@@ -270,6 +259,6 @@ fn build_dns_query(domain: &str, flag_id: u16) -> Vec<u8> {
 //     let queries = &[query1];
 
 //     dns_packet.set_queries(queries);
-    
+
 //     dns_packet.packet().to_vec()
 // }
