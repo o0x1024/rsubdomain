@@ -100,7 +100,7 @@ impl SendDog {
         udp_buffer.resize(8 + dns_query_len, 0u8);
 
         let mut udp_header = MutableUdpPacket::new(&mut udp_buffer).unwrap();
-        udp_header.set_source(rand::random::<u16>());
+        udp_header.set_source(src_port);
         udp_header.set_destination(53);
         udp_header.set_length(udp_header_len as u16 + dns_query_len as u16);
         udp_header.set_payload(&dns_query);
@@ -195,12 +195,12 @@ impl SendDog {
     }
 }
 
-fn generate_map_index(flag_id2: u16, index: u16) -> i32 {
+pub fn generate_map_index(flag_id2: u16, index: u16) -> i32 {
     // 由 flag_id2 和 index 生成 map 中的唯一 id
     (flag_id2 as i32 * 60000) + (index as i32)
 }
 
-fn generate_flag_index_from_map(index: usize) -> (u16, u16) {
+pub fn generate_flag_index_from_map(index: usize) -> (u16, u16) {
     // 从已经生成好的 map index 中返回 flag_id 和 index
     let yuzhi: usize = 60000;
     let flag2 = index / yuzhi;

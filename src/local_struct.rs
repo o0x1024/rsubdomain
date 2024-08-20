@@ -9,9 +9,10 @@ struct LocalNode {
     index: u32,
 }
 
-struct LocalRetryStruct {
-    v: StatusTable,
-    index: u32,
+#[derive(Debug)]
+pub struct LocalRetryStruct {
+    pub v: StatusTable,
+    pub index: u32,
 }
 
 pub struct LocalStruct {
@@ -48,7 +49,7 @@ impl LocalStruct {
 
     // Search and delete node
     #[allow(dead_code)]
-    fn search_from_index_and_delete(&mut self, index: u32) -> Result<LocalRetryStruct, Box<dyn Error>> {
+    pub fn search_from_index_and_delete(&mut self, index: u32) -> Result<LocalRetryStruct, Box<dyn Error>> {
         let _guard = self.lock.write().unwrap();
 
         for i in 0..self.items.len() {

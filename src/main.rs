@@ -15,13 +15,11 @@ use rsubdomain::subdata::get_default_sub_next_data;
 #[tokio::main]
 async fn main() {
     let opts = Opts::parse();
-
     println!("{:?}", opts.domain);
-
     let ether = device::auto_get_devices();
     println!("{:?}", ether);
 
-    sleep(Duration::from_millis(500));
+
     let mut rng = rand::thread_rng();
     let flag_id: u16 = rng.gen_range(400..655);
 

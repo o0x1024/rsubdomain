@@ -11,6 +11,7 @@ pub struct EthTable {
 }
 
 #[derive(Clone)]
+#[derive(Debug)]
 pub struct StatusTable  {
 	pub domain:      String, // 查询域名
 	pub dns   :      String, // 查询dns

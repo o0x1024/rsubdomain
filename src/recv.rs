@@ -6,6 +6,8 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::{ip::IpNextHeaderProtocols, Packet};
 use std::sync::mpsc;
+use crate::local_struct::LOCAL_STATUS;
+use crate::send;
 
 pub fn recv(device: String, flag_id: u16, retry_chan: mpsc::Sender<()>) {
     let interfaces = datalink::interfaces();
@@ -24,6 +26,8 @@ pub fn recv(device: String, flag_id: u16, retry_chan: mpsc::Sender<()>) {
         ),
     };
 
+    let  mut local_status = LOCAL_STATUS.write().unwrap();
+
     let mut count: i32 = 0;
     loop {
         match rx.next() {
@@ -40,21 +44,32 @@ pub fn recv(device: String, flag_id: u16, retry_chan: mpsc::Sender<()>) {
                                 if let Some(dns) = DnsPacket::new(dns_payload) {
                                     let is_response = dns.get_is_response();
                                     let rtcode = dns.get_rcode();
-                                    if is_response == 0x1 && rtcode == Retcode::NoError {
-                                        count += 1;
-                                        let mut query_name = String::new();
-                                        for query in dns.get_queries() {
-                                            println!("{} ", query.get_qname_parsed());
-                                            query_name.push_str(query.get_qname_parsed().as_str())
+
+                                    if dns.get_id()/100 == flag_id{
+                                        let index = send::generate_map_index(dns.get_id()%100, udp.get_destination());
+                                        match local_status.search_from_index_and_delete(index as u32){
+                                            Ok(data)=>{
+                                                println!("{:?}",data.v)
+                                            },
+                                            Err(err) => println!("{}",err)
                                         }
-                                        for res in dns.get_responses() {
-                                            if res.rtype == DnsTypes::A {
-                                                println!("{} -> {:?}",query_name, res.data);
-                                            }
-                                        }
-                                        println!("{} ", count);
-                                       
                                     }
+
+                                    // if is_response == 0x1 && rtcode == Retcode::NoError {
+                                    //     count += 1;
+                                    //     let mut query_name = String::new();
+                                    //     for query in dns.get_queries() {
+                                    //         println!("{} ", query.get_qname_parsed());
+                                    //         query_name.push_str(query.get_qname_parsed().as_str())
+                                    //     }
+                                    //     for res in dns.get_responses() {
+                                    //         if res.rtype == DnsTypes::A {
+                                    //             println!("{} -> {:?}",query_name, res.data);
+                                    //         }
+                                    //     }
+                                    //     println!("{} ", count);
+                                       
+                                    // }
                                     // println!("{} ", count);
 
                                     // println!("{:?}", dns.get_queries());

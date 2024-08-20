@@ -8,3 +8,4 @@ pub mod recv;
 pub mod model;
 pub mod stack;
 pub mod local_struct;
+pub mod gen;
