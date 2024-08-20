@@ -1,4 +1,4 @@
-use std::sync:: RwLock;
+use std::sync::{Arc,  RwLock};
 use std::time::SystemTime;
 use std::error::Error;
 use crate::model:: StatusTable;
@@ -97,5 +97,5 @@ impl LocalStruct {
 use lazy_static::lazy_static;
 
 lazy_static! {
-    pub static ref LOCAL_STATUS: RwLock<LocalStruct> = RwLock::new(LocalStruct::new());
+    pub static ref LOCAL_STATUS: Arc<RwLock<LocalStruct>> = Arc::new(RwLock::new(LocalStruct::new()));
 }
