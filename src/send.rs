@@ -1,6 +1,6 @@
-use crate::local_struct::LOCAL_STATUS;
+
 use crate::model::{EthTable, StatusTable};
-use crate::stack::LOCAL_STACK;
+use crate::structs::{LOCAL_STACK, LOCAL_STATUS};
 
 use pnet::datalink::Channel::Ethernet;
 use pnet::datalink::{self, DataLinkSender};
@@ -9,11 +9,9 @@ use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
 use pnet::packet::ipv4::{Ipv4Flags, MutableIpv4Packet};
 use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket};
 use pnet::packet::{ip::IpNextHeaderProtocols, Packet};
-use std::cell::RefCell;
+use rand::Rng;
 use std::net::Ipv4Addr;
-use std::rc::Rc;
-use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{i32, thread};
 
@@ -23,10 +21,10 @@ use std::{i32, thread};
 pub struct SendDog {
     ether: EthTable,
     dns: Vec<String>,
-    handle: Rc<RefCell<Box<dyn DataLinkSender>>>,
+    handle: Arc<Mutex<Box<dyn DataLinkSender>>>,
     print_status: bool,
     index: u16,
-    lock: Rc<Mutex<()>>,
+    lock: Arc<Mutex<()>>,
     increate_index: bool,
     flag_id: u16,
     flag_id2: u16,
@@ -50,7 +48,7 @@ impl SendDog {
             ),
         };
 
-        let handle: Rc<RefCell<Box<dyn DataLinkSender>>> = Rc::new(RefCell::new(_handle));
+        let handle: Arc<Mutex<Box<dyn DataLinkSender>>> = Arc::new(Mutex::new(_handle));
 
         let default_dns: Vec<String>;
         if dns.len() == 0 {
@@ -81,13 +79,13 @@ impl SendDog {
     }
 
     pub fn chose_dns(&self) -> String {
-        // let mut rng = rand::thread_rng();
-        // let index = rng.gen_range(0..self.dns.len() - 1);
-        self.dns[0].to_owned()
+        let mut rng = rand::thread_rng();
+        let index = rng.gen_range(0..self.dns.len() - 1);
+        self.dns[index].to_owned()
     }
 
     pub fn send(&self, domain: String, dnsname: String, src_port: u16, flag_id: u16) {
-        let dns_query: Vec<u8> = build_dns_query(domain.as_str(), flag_id);
+        let dns_query: Vec<u8> = build_dns_query(domain.as_str(), self.flag_id*100+flag_id);
         let dns_query_len = dns_query.len();
         let ipv4_source: Ipv4Addr = self.ether.src_ip;
         let ipv4_destination: Ipv4Addr = dnsname.parse().unwrap();
@@ -135,8 +133,9 @@ impl SendDog {
         final_packet.extend_from_slice(udp_header.packet());
 
         
+        let mut handle = self.handle.lock().unwrap();
         let res = {
-            let mut handle = self.handle.borrow_mut();
+            // let mut handle = self.handle.borrow_mut();
             handle.send_to(&final_packet, None)
         };
 
@@ -189,8 +188,12 @@ impl SendDog {
             domain_level,
         };
 
-        let mut local_status = LOCAL_STATUS.write().unwrap();
-        local_status.append(status, index as u32);
+        match LOCAL_STATUS.try_write(){
+            Ok(mut local_status) =>{
+                local_status.append(status, index as u32);
+            },
+            Err(_) =>()
+        }
         (self.flag_id2, self.index)
     }
 }

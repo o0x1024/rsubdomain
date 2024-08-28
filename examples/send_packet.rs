@@ -37,7 +37,6 @@ async fn main() {
         send_icmp_datalink(ether, "172.31.36.33");
     }
 
-    // println!("DNS query sent!");
 }
 const ICMP_SIZE: usize = 40;
 
@@ -102,7 +101,6 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     let checksum = ipv4_checksum(&udp_header.to_immutable(), &ipv4_source, &ipv4_destination);
     udp_header.set_checksum(checksum);
 
-    println!("dns_query_len:{}",dns_query.len());
     let mut final_packet = Vec::new();
     final_packet.extend_from_slice(ethernet_packet.packet());
     final_packet.extend_from_slice(ipv4_header.packet());

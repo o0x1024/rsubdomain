@@ -48,8 +48,3 @@ impl<T: Clone> Stack<T> {
     }
 }
 
-use lazy_static::lazy_static;
-
-lazy_static! {
-    pub static ref LOCAL_STACK: RwLock<Stack<usize>> = RwLock::new(Stack::new());
-}

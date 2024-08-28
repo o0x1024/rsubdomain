@@ -1,7 +1,7 @@
-use std::sync::{Arc,  RwLock};
-use std::time::SystemTime;
+use crate::model::StatusTable;
 use std::error::Error;
-use crate::model:: StatusTable;
+use std::sync::RwLock;
+use std::time::SystemTime;
 
 #[derive(Clone)]
 struct LocalNode {
@@ -22,7 +22,7 @@ pub struct LocalStruct {
 
 impl LocalStruct {
     // Create a new LocalStruct
-    fn new() -> Self {
+    pub fn new() -> Self {
         LocalStruct {
             items: Vec::new(),
             lock: RwLock::new(()),
@@ -49,7 +49,10 @@ impl LocalStruct {
 
     // Search and delete node
     #[allow(dead_code)]
-    pub fn search_from_index_and_delete(&mut self, index: u32) -> Result<LocalRetryStruct, Box<dyn Error>> {
+    pub fn search_from_index_and_delete(
+        &mut self,
+        index: u32,
+    ) -> Result<LocalRetryStruct, Box<dyn Error>> {
         let _guard = self.lock.write().unwrap();
 
         for i in 0..self.items.len() {
@@ -67,9 +70,12 @@ impl LocalStruct {
 
     // Get timeout data, with an optional limit on the number of items returned
     #[allow(dead_code)]
-    fn get_timeout_data(&mut self, max: usize) -> Vec<LocalRetryStruct> {
+    pub fn get_timeout_data(&mut self, max: usize) -> Vec<LocalRetryStruct> {
         let _guard = self.lock.write().unwrap();
-        let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+        let current_time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let mut tables = Vec::new();
         let mut index = 0;
 
@@ -91,11 +97,4 @@ impl LocalStruct {
         self.items.drain(0..index);
         tables
     }
-}
-
-
-use lazy_static::lazy_static;
-
-lazy_static! {
-    pub static ref LOCAL_STATUS: Arc<RwLock<LocalStruct>> = Arc::new(RwLock::new(LocalStruct::new()));
 }
