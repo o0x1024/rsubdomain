@@ -10,15 +10,23 @@ pub struct Opts {
     #[arg(short, long)]
     pub domain: Vec<String>,
 
-    /// list network 
+    /// list network
     #[arg(short, long)]
     pub list_network: bool,
 
-
-    /// resolvers path,use default dns on default 
+    /// resolvers path,use default dns on default
     #[arg(short, long)]
     pub resolvers: Vec<String>,
 
-    
+    /// print result
+    #[arg(short, long)]
+    pub print_status: bool,
 
+    /// slient
+    #[arg(short, long, default_value = "false")]
+    pub slient: bool,
+
+    /// dic path
+    #[arg(short, long )]
+    pub file: Option<String>,
 }

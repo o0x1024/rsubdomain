@@ -22,7 +22,6 @@ pub struct SendDog {
     ether: EthTable,
     dns: Vec<String>,
     handle: Arc<Mutex<Box<dyn DataLinkSender>>>,
-    print_status: bool,
     index: u16,
     lock: Arc<Mutex<()>>,
     increate_index: bool,
@@ -31,7 +30,7 @@ pub struct SendDog {
 }
 
 impl SendDog {
-    pub fn new(ether: EthTable, dns: Vec<String>, flag_id: u16, print_status: bool) -> SendDog {
+    pub fn new(ether: EthTable, dns: Vec<String>, flag_id: u16) -> SendDog {
         let interfaces = datalink::interfaces();
 
         let interface = interfaces
@@ -69,7 +68,6 @@ impl SendDog {
             ether,
             dns: default_dns,
             flag_id,
-            print_status,
             handle,
             index: 10000,
             lock: Mutex::new(()).into(),
@@ -187,8 +185,8 @@ impl SendDog {
             retry: 0,
             domain_level,
         };
-
-        match LOCAL_STATUS.try_write(){
+        // println!("{:?}",status);
+        match LOCAL_STATUS.write(){
             Ok(mut local_status) =>{
                 local_status.append(status, index as u32);
             },

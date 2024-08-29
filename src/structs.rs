@@ -12,6 +12,7 @@ static SEND_INDEX: AtomicU8 = AtomicU8::new(0);
 static SUCCESS_INDEX: AtomicU8 = AtomicU8::new(0);
 
 // 重发状态数据结构
+#[derive(Debug)]
 pub struct RetryStruct {
     pub domain: String,
     pub dns: String,

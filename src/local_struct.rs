@@ -4,6 +4,7 @@ use std::sync::RwLock;
 use std::time::SystemTime;
 
 #[derive(Clone)]
+#[derive(Debug)]
 struct LocalNode {
     v: StatusTable,
     index: u32,
@@ -15,9 +16,9 @@ pub struct LocalRetryStruct {
     pub index: u32,
 }
 
+#[derive(Debug)]
 pub struct LocalStruct {
     items: Vec<LocalNode>,
-    lock: RwLock<()>,
 }
 
 impl LocalStruct {
@@ -25,14 +26,13 @@ impl LocalStruct {
     pub fn new() -> Self {
         LocalStruct {
             items: Vec::new(),
-            lock: RwLock::new(()),
+            
         }
     }
 
     // Return the number of items in the stack
     #[allow(dead_code)]
     fn len(&self) -> usize {
-        let _guard = self.lock.read().unwrap();
         self.items.len()
     }
 
@@ -42,7 +42,6 @@ impl LocalStruct {
     }
 
     pub fn append(&mut self, node: StatusTable, index: u32) {
-        let _guard = self.lock.write().unwrap();
         let new_node = LocalNode { v: node, index };
         self.items.push(new_node);
     }
@@ -53,8 +52,6 @@ impl LocalStruct {
         &mut self,
         index: u32,
     ) -> Result<LocalRetryStruct, Box<dyn Error>> {
-        let _guard = self.lock.write().unwrap();
-
         for i in 0..self.items.len() {
             if self.items[i].index == index {
                 let ret = LocalRetryStruct {
@@ -71,7 +68,6 @@ impl LocalStruct {
     // Get timeout data, with an optional limit on the number of items returned
     #[allow(dead_code)]
     pub fn get_timeout_data(&mut self, max: usize) -> Vec<LocalRetryStruct> {
-        let _guard = self.lock.write().unwrap();
         let current_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
