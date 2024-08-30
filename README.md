@@ -1,3 +1,6 @@
+## rsubdomain
+Implementation principle reference [ksubdomain](https://github.com/knownsec/ksubdomain)
+
 ## Why
 for learn rust and network programming
 
