@@ -17,3 +17,8 @@ lazy_static = "1.4"
 chrono = "0.4"
 itertools = "0.13.0"
 crossbeam-channel = "0.5"
+
+
+[dev-dependencies]
+similar = "2.0"
+strsim = "0.10"

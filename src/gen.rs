@@ -24,9 +24,22 @@ pub fn generate_subdomains(domains: &[&str],suffix:Vec<&str>) -> Vec<String> {
     subdomains
 }
 
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strsim::{levenshtein,jaro_winkler};
+
+
+    #[test]
+    fn string_match(){
+        let s1 = "static2-scloud-letv.yysh.mgtv.com";
+        let s2 = "static2-abc-letv.yysh.mgtv.com";
+        let distance = jaro_winkler(s1, s2);
+        println!("Levenshtein distance: {}", distance);
+    }
 
     #[test]
     fn internal() {
