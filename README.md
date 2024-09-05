@@ -6,7 +6,7 @@ for learn rust and network programming
 
 
 ## Usage
-use before need install libpcap or npcap.
+use before need install `libpcap` or `npcap`.
 
 ```
 $ git clone https://github.com/o0x1024/rsubdomain
