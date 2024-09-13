@@ -4,8 +4,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread::sleep;
-use std::time::Duration;
-
+use std::time::{Duration, Instant};
+use log::{info, trace, warn};
 use clap::Parser;
 use rand;
 use rand::Rng;
@@ -18,6 +18,8 @@ use rsubdomain::{recv, send};
 
 #[tokio::main]
 async fn main() {
+    let start = Instant::now();
+    
     let opts = Opts::parse();
     println!("{:?}", opts.domain);
     let ether = device::auto_get_devices();
@@ -201,5 +203,6 @@ async fn main() {
         sleep(Duration::from_millis(1000))
     }
     running.store(false, Ordering::Relaxed);
-    println!("done")
+    let duration = start.elapsed();
+    println!("[*] time: {:?}", duration);
 }

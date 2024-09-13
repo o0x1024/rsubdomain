@@ -38,7 +38,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-d","ynairport.com","-p","-f","assets/dic.txt"],
+            "args": ["-d","mgtv.com","-p","-f","dict/dic.txt"],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_BACKTRACE": "1"
