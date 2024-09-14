@@ -5,7 +5,7 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::Packet;
 use std::sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc};
 
-pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<AtomicBool>) {
+pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: &Arc<AtomicBool>) {
     let interfaces = datalink::interfaces();
 
     let interface = interfaces

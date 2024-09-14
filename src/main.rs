@@ -23,7 +23,7 @@ async fn main() {
     let opts = Opts::parse();
     println!("{:?}", opts.domain);
     let ether = device::auto_get_devices();
-    println!("{:?}", ether);
+    println!("{:?}", ether);    
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
     let flag_id: u16 = rng.gen_range(400..655);
     let device_clone = ether.device.clone();
@@ -37,17 +37,16 @@ async fn main() {
         mpsc::Sender<Arc<RwLock<RetryStruct>>>,
         mpsc::Receiver<Arc<RwLock<RetryStruct>>>,
     ) = mpsc::channel();
-
     {
         //网卡收包
-        let running_clone: Arc<AtomicBool> = running.clone();
+        let running_clone = Arc::clone(&running);
         tokio::spawn(async move {
-            recv::recv(device_clone, dns_send, running_clone);
+            recv::recv(device_clone, dns_send, &running_clone);
         });
     }
 
     {
-        let running_clone: Arc<AtomicBool> = running.clone();
+        let running_clone: Arc<AtomicBool> = Arc::clone(&running);
         //处理收到的包
         tokio::spawn(async move {
             handle::handle_dns_packet(dns_recv, opts.print_status, flag_id, running_clone,opts.slient);
@@ -93,7 +92,7 @@ async fn main() {
     }
     println!("subdomain count:{}", count);
 
-    let senddog_clone = Arc::clone(&senddog);
+    let senddog_clone: Arc<Mutex<SendDog>> = Arc::clone(&senddog);
     {
         let running: Arc<AtomicBool> = running.clone();
         //处理超时的域名
@@ -168,11 +167,11 @@ async fn main() {
     }
 
     {
-        let running: Arc<AtomicBool> = running.clone();
+        let running_clone: Arc<AtomicBool> = Arc::clone(&running);
         let senddog = Arc::clone(&senddog);
         //超时的重发
         tokio::spawn(async move {
-            while running.load(Ordering::Relaxed) {
+            while running_clone.load(Ordering::Relaxed) {
                 match retry_recv.recv() {
                     Ok(res) => {
                         let rety_data = res.read().unwrap();

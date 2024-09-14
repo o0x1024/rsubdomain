@@ -3,6 +3,10 @@ use rsubdomain::device;
 
 #[tokio::main]
 async  fn main() {
-    let ether = device::auto_get_devices();
-    println!("{:?}",ether);
+    let mut s1 = 123;
+    let s2 = &s1;
+
+
+    println!("{}",s1);
+    println!("{}",s2);
 }
