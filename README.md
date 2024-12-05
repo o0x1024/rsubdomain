@@ -7,6 +7,12 @@ for learn rust and network programming
 
 ## Usage
 use before need install `libpcap` or `npcap`.
+download 'npcap-sdb' add dir to PATH [LIB] [C:\Program Files\npcap-sdk\Lib\x64]
+![1733370190766](https://github.com/user-attachments/assets/3866c1e3-7be8-42c7-88d6-86cb3097fd93)
+
+![1733370121067](https://github.com/user-attachments/assets/6ade92e8-f3db-459a-ae02-678351de601d)
+
+
 
 ```
 $ git clone https://github.com/o0x1024/rsubdomain
