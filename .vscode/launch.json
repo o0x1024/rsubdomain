@@ -1,0 +1,88 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'rsubdomain'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=rsubdomain"
+                ],
+                "filter": {
+                    "name": "rsubdomain",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'rsubdomain'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=rsubdomain",
+                    "--package=rsubdomain"
+                ],
+                "filter": {
+                    "name": "rsubdomain",
+                    "kind": "bin"
+                }
+            },
+            "args": ["-d","baidu.com","--summary"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
+            
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'rsubdomain'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=rsubdomain",
+                    "--package=rsubdomain"
+                ],
+                "filter": {
+                    "name": "rsubdomain",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug send packet",
+            "cargo": {
+                "args": [
+
+                    
+                    "run",
+                    "--bin=rsubdomain",
+                    "--package=rsubdomain"
+                ],
+                "filter": {
+                    "name": "rsubdomain",
+                    "kind": "bin"
+                }
+            },
+            "args": ["--example","send_packet"],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

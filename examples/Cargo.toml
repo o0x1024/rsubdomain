@@ -1,0 +1,32 @@
+[package]
+name = "rsubdomain-example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 本地依赖rsubdomain库
+rsubdomain = { path = "../" }
+
+# 或者从git仓库依赖
+# rsubdomain = { git = "https://github.com/o0x1024/rsubdomain" }
+
+# 或者从crates.io依赖（如果已发布）
+# rsubdomain = "1.0.0"
+
+# 异步运行时
+tokio = { version = "1.0", features = ["full"] }
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 错误处理
+anyhow = "1.0"
+thiserror = "1.0"
+
+[[bin]]
+name = "library_usage"
+path = "library_usage.rs" 
