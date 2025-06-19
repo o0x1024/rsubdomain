@@ -1,7 +1,25 @@
 [package]
 name = "rsubdomain"
-version = "0.1.0"
+version = "1.2.0"
 edition = "2021"
+authors = ["gelenlen <your-email@example.com>"]
+description = "A high-performance subdomain brute-force tool written in Rust"
+homepage = "https://github.com/o0x1024/rsubdomain"
+repository = "https://github.com/o0x1024/rsubdomain"
+license = "MIT"
+readme = "README.md"
+keywords = ["subdomain", "dns", "security", "network", "brute-force"]
+categories = ["command-line-utilities", "network-programming"]
+
+# 库配置
+[lib]
+name = "rsubdomain"
+path = "src/lib.rs"
+
+# 二进制配置
+[[bin]]
+name = "rsubdomain"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,7 +32,7 @@ rand= "0.8.5"
 clap = { version = "4.5.13", features = ["derive"] }
 tokio = { version = "1.39.2", features = ["full"] }
 lazy_static = "1.4"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 itertools = "0.13.0"
 crossbeam-channel = "0.5"
 reqwest = { version = "0.11", features = ["json"] }
@@ -26,3 +44,18 @@ regex = "1.0"
 [dev-dependencies]
 similar = "2.0"
 strsim = "0.10"
+tokio-test = "0.4"
+
+# 功能特性
+[features]
+default = ["full"]
+full = ["verify", "dns-resolver", "speed-test", "output"]
+verify = []
+dns-resolver = []
+speed-test = []
+output = []
+
+# 文档配置
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
