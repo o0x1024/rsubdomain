@@ -8,7 +8,7 @@ use rand::Rng;
 
 use crate::device;
 use crate::send::SendDog;
-use crate::structs::{RetryStruct, LOCAL_STATUS};
+use crate::structs::RetryStruct;
 use crate::subdata;
 use crate::{recv, send, handle};
 use crate::wildcard::WildcardDetector;
@@ -16,6 +16,7 @@ use crate::verify::{DomainVerifier, VerifyResult};
 use crate::dns_resolver::{DnsResolver, DnsResolveResult};
 use crate::speed_test::{SpeedTester, BandwidthLimiter};
 use crate::input::parse_bandwidth;
+use crate::state::BruteForceState;
 
 /// 域名暴破配置
 #[derive(Debug, Clone)]
@@ -73,6 +74,7 @@ pub struct SubdomainBruteEngine {
     verifier: Option<DomainVerifier>,
     dns_resolver: Option<DnsResolver>,
     bandwidth_limiter: Option<BandwidthLimiter>,
+    state: BruteForceState,
 }
 
 impl SubdomainBruteEngine {
@@ -109,6 +111,7 @@ impl SubdomainBruteEngine {
             verifier,
             dns_resolver,
             bandwidth_limiter,
+            state: BruteForceState::new(),
         })
     }
 
@@ -181,7 +184,7 @@ impl SubdomainBruteEngine {
     /// 核心暴破逻辑（整合原有的DNS查询逻辑）
     async fn run_core_brute_force(&self) -> Result<Vec<SubdomainResult>, Box<dyn std::error::Error>> {
         // 清空之前的结果
-        handle::clear_discovered_domains();
+        self.state.clear_discovered_domains();
         
         // 选择网络设备
         let ether = if let Some(device_name) = &self.config.device {
@@ -236,8 +239,9 @@ impl SubdomainBruteEngine {
 
         // 启动DNS包处理任务
         let running_clone = running.clone();
+        let state_clone = self.state.clone();
         tokio::spawn(async move {
-            handle::handle_dns_packet(dns_recv, flag_id, running_clone, silent);
+            handle::handle_dns_packet(dns_recv, flag_id, running_clone, silent, state_clone);
         });
 
         // 发送DNS查询
@@ -250,8 +254,9 @@ impl SubdomainBruteEngine {
         // 启动超时和重试处理任务
         let running_clone = running.clone();
         let senddog_clone = senddog.clone();
+        let state_clone = self.state.clone();
         tokio::spawn(async move {
-            Self::handle_timeout_domains_static(running_clone, senddog_clone, retry_send).await;
+            Self::handle_timeout_domains_with_state(running_clone, senddog_clone, retry_send, state_clone).await;
         });
 
         let running_clone = running.clone();
@@ -261,11 +266,11 @@ impl SubdomainBruteEngine {
         });
 
         // 等待所有查询完成
-        Self::wait_for_completion_static().await;
+        self.wait_for_completion().await;
         running.store(false, Ordering::Relaxed);
 
         // 获取发现的域名并转换为结果格式
-        let discovered = handle::get_discovered_domains();
+        let discovered = self.state.get_discovered_domains();
         let results: Vec<SubdomainResult> = discovered.into_iter().map(|d| SubdomainResult {
             domain: d.domain,
             ip: d.ip,
@@ -322,41 +327,31 @@ impl SubdomainBruteEngine {
         Ok(count)
     }
 
-    /// 处理超时域名（静态方法）
-    async fn handle_timeout_domains_static(
+    /// 处理超时域名（带状态参数）
+    async fn handle_timeout_domains_with_state(
         running: Arc<AtomicBool>,
         senddog: Arc<Mutex<SendDog>>,
         retry_send: mpsc::Sender<Arc<std::sync::RwLock<RetryStruct>>>,
+        state: BruteForceState,
     ) {
         while running.load(Ordering::Relaxed) {
             let mut is_delay = true;
-            let mut datas = Vec::new();
-            match LOCAL_STATUS.write() {
-                Ok(mut local_status) => {
-                    let max_length = (1000000 / 10) as usize;
-                    datas = local_status.get_timeout_data(max_length);
-                    is_delay = datas.len() > 100;
-                }
-                Err(_) => (),
-            }
+            let max_length = (1000000 / 10) as usize;
+            let datas = state.get_timeout_data(max_length);
+            is_delay = datas.len() > 100;
 
             for local_data in datas {
                 let index = local_data.index;
                 let mut value = local_data.v;
 
                 if value.retry >= 5 {
-                    match LOCAL_STATUS.write() {
-                        Ok(mut local_status) => {
-                            match local_status.search_from_index_and_delete(index as u32) {
-                                Ok(_data) => {
-                                    // 删除失败项
-                                }
-                                Err(_) => (),
-                            }
-                            continue;
+                    match state.search_from_index_and_delete(index as u32) {
+                        Ok(_data) => {
+                            // 删除失败项
                         }
                         Err(_) => (),
                     }
+                    continue;
                 }
                 
                 let senddog = senddog.lock().unwrap();
@@ -364,15 +359,8 @@ impl SubdomainBruteEngine {
                 value.time = chrono::Utc::now().timestamp() as u64;
                 value.dns = senddog.chose_dns();
                 let value_c = value.clone();
-                {
-                    match LOCAL_STATUS.write() {
-                        Ok(mut local_status) => {
-                            local_status.search_from_index_and_delete(index);
-                            local_status.append(value_c, index);
-                        }
-                        Err(_) => {}
-                    }
-                }
+                let _ = state.search_from_index_and_delete(index as u32);
+                state.append_status(value_c, index as u32);
 
                 let (flag_id, src_port) = send::generate_flag_index_from_map(index as usize);
                 let retry_struct = RetryStruct {
@@ -417,16 +405,11 @@ impl SubdomainBruteEngine {
         }
     }
 
-    /// 等待所有查询完成（静态方法）
-    async fn wait_for_completion_static() {
+    /// 等待所有查询完成
+    async fn wait_for_completion(&self) {
         loop {
-            match LOCAL_STATUS.read() {
-                Ok(local_status) => {
-                    if local_status.empty() {
-                        break;
-                    }
-                }
-                Err(_) => (),
+            if self.state.is_local_status_empty() {
+                break;
             }
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
@@ -454,4 +437,4 @@ pub async fn run_speed_test(duration_secs: u64) -> Result<(), Box<dyn std::error
     let result = tester.run_speed_test(duration_secs).await;
     tester.display_result(&result);
     Ok(())
-} 
+}

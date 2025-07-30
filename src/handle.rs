@@ -17,6 +17,7 @@ use pnet::packet::{
 use crate::{
     send,
     structs::{LOCAL_STACK, LOCAL_STATUS},
+    state::BruteForceState,
 };
 
 /// 发现的域名结果
@@ -75,6 +76,7 @@ pub fn handle_dns_packet(
     flag_id: u16,
     running: Arc<AtomicBool>,
     silent: bool,
+    state: BruteForceState,
 ) {
     // 打印表格头部
     if !silent {
@@ -98,7 +100,8 @@ pub fn handle_dns_packet(
                                     &udp, 
                                     silent,
                                     &mut domain_list,
-                                    &mut ip_list
+                                    &mut ip_list,
+                                    &state
                                 );
                             }
                         }
@@ -118,6 +121,7 @@ fn process_dns_response(
     silent: bool,
     domain_list: &mut Vec<String>,
     ip_list: &mut Vec<String>,
+    state: &BruteForceState,
 ) {
     let mut query_name: String = String::new();
     if dns.get_is_response() == 0 {
@@ -149,9 +153,7 @@ fn process_dns_response(
                             timestamp,
                         };
                         
-                        if let Ok(mut domains) = DISCOVERED_DOMAINS.lock() {
-                            domains.push(discovered);
-                        }
+                        state.add_discovered_domain(discovered);
 
                         if silent {
                             println!("{}", query_name);
@@ -178,9 +180,7 @@ fn process_dns_response(
                             timestamp,
                         };
                         
-                        if let Ok(mut domains) = DISCOVERED_DOMAINS.lock() {
-                            domains.push(discovered);
-                        }
+                        state.add_discovered_domain(discovered);
 
                         if !silent {
                             println!("{:<30} {:<50} {:<10} {}", 
@@ -202,9 +202,7 @@ fn process_dns_response(
                             timestamp,
                         };
                         
-                        if let Ok(mut domains) = DISCOVERED_DOMAINS.lock() {
-                            domains.push(discovered);
-                        }
+                        state.add_discovered_domain(discovered);
 
                         if !silent {
                             println!("{:<30} {:<50} {:<10} {}", 
@@ -229,9 +227,7 @@ fn process_dns_response(
                                 timestamp,
                             };
                             
-                            if let Ok(mut domains) = DISCOVERED_DOMAINS.lock() {
-                                domains.push(discovered);
-                            }
+                            state.add_discovered_domain(discovered);
 
                             if !silent {
                                 println!("{:<30} {:<50} {:<10} {}", 
@@ -254,9 +250,7 @@ fn process_dns_response(
                             timestamp,
                         };
                         
-                        if let Ok(mut domains) = DISCOVERED_DOMAINS.lock() {
-                            domains.push(discovered);
-                        }
+                        state.add_discovered_domain(discovered);
 
                         if !silent {
                             println!("{:<30} {:<50} {:<10} {}", 

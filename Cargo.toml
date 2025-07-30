@@ -1,6 +1,6 @@
 [package]
 name = "rsubdomain"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2021"
 authors = ["o0x1024 <o0x1024@gmail.com>"]
 description = "A high-performance subdomain brute-force tool written in Rust"

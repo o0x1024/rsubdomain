@@ -21,6 +21,7 @@ use rsubdomain::verify::DomainVerifier;
 use rsubdomain::dns_resolver::DnsResolver;
 use rsubdomain::output::export_results;
 use rsubdomain::handle::VerificationResult;
+use rsubdomain::state::BruteForceState;
 
 #[tokio::main]
 async fn main() {
@@ -123,6 +124,7 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
 
     let senddog = Arc::new(Mutex::new(SendDog::new(ether, opts.resolvers.clone(), flag_id)));
     let sub_domain_list = subdata::get_default_sub_next_data();
+    let state = BruteForceState::new();
 
     let (dns_send, dns_recv) = mpsc::channel();
     let (retry_send, retry_recv): (
@@ -134,7 +136,7 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
     start_packet_receiver(device_clone, dns_send, running.clone()).await;
 
     // 启动DNS包处理任务
-    start_dns_packet_handler(dns_recv, flag_id, running.clone(), opts.slient).await;
+    start_dns_packet_handler(dns_recv, flag_id, running.clone(), opts.slient, state.clone()).await;
 
     // 发送DNS查询
     let count = send_dns_queries(&opts, &senddog, &sub_domain_list, &bandwidth_limiter).await?;
@@ -197,9 +199,10 @@ async fn start_dns_packet_handler(
     flag_id: u16,
     running: Arc<AtomicBool>,
     silent: bool,
+    state: BruteForceState,
 ) {
     tokio::spawn(async move {
-        handle::handle_dns_packet(dns_recv, flag_id, running, silent);
+        handle::handle_dns_packet(dns_recv, flag_id, running, silent, state);
     });
 }
 

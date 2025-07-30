@@ -38,7 +38,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-d","baidu.com","--summary"],
+            "args": ["-d","mgtv.com","--summary"],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_BACKTRACE": "1"

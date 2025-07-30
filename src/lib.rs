@@ -77,6 +77,7 @@ pub mod verify;
 pub mod dns_resolver;
 pub mod api;
 pub mod output;
+pub mod state;
 
 // 重新导出主要的公共API
 pub use api::{
@@ -98,3 +99,6 @@ pub use handle::{DiscoveredDomain, VerificationResult, SummaryStats};
 
 // 设备相关
 pub use device::{NetworkDevice, list_network_devices, print_network_devices};
+
+// 状态管理
+pub use state::BruteForceState;
