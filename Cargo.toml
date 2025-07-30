@@ -2,7 +2,7 @@
 name = "rsubdomain"
 version = "1.2.0"
 edition = "2021"
-authors = ["gelenlen <your-email@example.com>"]
+authors = ["o0x1024 <o0x1024@gmail.com>"]
 description = "A high-performance subdomain brute-force tool written in Rust"
 homepage = "https://github.com/o0x1024/rsubdomain"
 repository = "https://github.com/o0x1024/rsubdomain"
