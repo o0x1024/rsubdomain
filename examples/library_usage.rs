@@ -22,7 +22,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("\n=== 示例4: 网速测试 ===");
     speed_test_example().await?;
 
-    Ok(())
+    println!("\n=== 所有示例执行完成 ===");
+    println!("程序执行完成，强制退出确保进程终止");
+    
+    // 经过测试确认，程序无法自然退出，需要强制退出
+    std::process::exit(0)
 }
 
 /// 示例1: 基本域名暴破
@@ -30,7 +34,17 @@ async fn basic_brute_force() -> Result<(), Box<dyn Error>> {
     let domains = vec!["example.com".to_string()];
     let dictionary_file = None; // 使用内置字典
     
-    match brute_force_subdomains(domains, dictionary_file).await {
+    match brute_force_subdomains(
+        domains, 
+        dictionary_file, 
+        None, // resolvers
+        true, // skip_wildcard
+        None, // bandwidth_limit
+        false, // verify_mode
+        false, // resolve_records
+        true, // silent
+        None // device
+    ).await {
         Ok(results) => {
             println!("发现 {} 个子域名:", results.len());
             for result in results.iter().take(10) { // 只显示前10个
@@ -46,6 +60,7 @@ async fn basic_brute_force() -> Result<(), Box<dyn Error>> {
 /// 示例2: 高级域名暴破
 async fn advanced_brute_force() -> Result<(), Box<dyn Error>> {
     let config = SubdomainBruteConfig {
+        dictionary: None, // Use default dictionary
         domains: vec!["example.com".to_string(), "test.com".to_string()],
         resolvers: vec!["8.8.8.8".to_string(), "1.1.1.1".to_string()],
         dictionary_file: Some("wordlist.txt".to_string()), // 使用自定义字典
@@ -82,6 +97,7 @@ async fn full_featured_brute_force() -> Result<(), Box<dyn Error>> {
         resolvers: vec!["8.8.8.8".to_string()],
         dictionary_file: None,
         skip_wildcard: true,
+        dictionary: None,
         bandwidth_limit: Some("3M".to_string()),
         verify_mode: true,      // 启用HTTP/HTTPS验证
         resolve_records: true,  // 启用DNS记录解析
@@ -251,4 +267,4 @@ async fn error_handling_example() -> Result<(), Box<dyn Error>> {
     }
     
     Ok(())
-} 
+}

@@ -12,7 +12,7 @@ use pnet::packet::{ip::IpNextHeaderProtocols, util, Packet};
 use pnet::transport::{transport_channel, TransportProtocol};
 use pnet::transport::TransportChannelType::Layer4;
 
-use pnet::util::MacAddr;
+use pnet::datalink::MacAddr;
 
 use rsubdomain::device;
 use rsubdomain::model::EthTable;
@@ -25,7 +25,7 @@ use pnet::datalink::Channel::Ethernet;
 #[tokio::main]
 async fn main() {
     // 获取网络接口
-    let ether = device::auto_get_devices();
+    let ether = device::auto_get_devices().await;
     println!("{:?}", ether);
     let flg = 2;
 

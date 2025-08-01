@@ -27,6 +27,26 @@ serde_json = "1.0"
 anyhow = "1.0"
 thiserror = "1.0"
 
+# 网络包处理
+pnet = "0.35.0"
+rand = "0.8"
+
 [[bin]]
 name = "library_usage"
-path = "library_usage.rs" 
+path = "library_usage.rs"
+
+[[bin]]
+name = "test_device"
+path = "test_device.rs"
+
+[[bin]]
+name = "send_packet"
+path = "send_packet.rs"
+
+[[bin]]
+name = "dictionary_array_test"
+path = "dictionary_array_test.rs"
+
+[[bin]]
+name = "bandwidth_test"
+path = "bandwidth_test.rs"
