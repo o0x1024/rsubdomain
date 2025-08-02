@@ -1,9 +1,7 @@
 use std::fs::File;
 use std::io::{self, BufRead};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
-use std::thread::sleep;
 use std::time::Duration;
 
 use clap::Parser;
@@ -22,6 +20,9 @@ use rsubdomain::dns_resolver::DnsResolver;
 use rsubdomain::output::export_results;
 use rsubdomain::handle::VerificationResult;
 use rsubdomain::state::BruteForceState;
+use rsubdomain::structs::LOCAL_STACK;
+use rsubdomain::local_struct::LocalStruct;
+use rsubdomain::stack::Stack;
 
 #[tokio::main]
 async fn main() {
@@ -45,6 +46,7 @@ async fn main() {
     if let Err(e) = run_subdomain_brute(opts).await {
         eprintln!("域名暴破失败: {}", e);
     }
+    println!("程序执行完成");
 }
 
 /// 列出网络接口
@@ -55,7 +57,7 @@ fn list_network_interfaces() {
 
 /// 运行网速测试
 async fn run_network_speed_test(target_ip: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let tester = SpeedTester::new_with_target(target_ip);
+    let tester = SpeedTester::new_with_target(target_ip).await;
     let result = tester.run_speed_test(10).await; // 测试10秒
     tester.display_result(&result);
     Ok(())
@@ -74,11 +76,11 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
             }
             None => {
                 eprintln!("未找到指定的网络设备: {}，使用自动检测", device_name);
-                device::auto_get_devices()
+                device::auto_get_devices().await
             }
         }
     } else {
-        device::auto_get_devices()
+        device::auto_get_devices().await
     };
     
     println!("使用网络设备: {:?}", ether.device);
@@ -132,11 +134,11 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
         mpsc::Receiver<Arc<RwLock<RetryStruct>>>,
     ) = mpsc::channel();
 
-    // 启动收包任务
-    start_packet_receiver(device_clone, dns_send, running.clone()).await;
+    // 启动网卡收包任务
+    let packet_receiver_handle = start_packet_receiver(device_clone, dns_send, running.clone()).await;
 
     // 启动DNS包处理任务
-    start_dns_packet_handler(dns_recv, flag_id, running.clone(), opts.slient, state.clone()).await;
+    let dns_handler_handle = start_dns_packet_handler(dns_recv, flag_id, running.clone(), opts.slient, state.clone()).await;
 
     // 发送DNS查询
     let count = send_dns_queries(&opts, &senddog, &sub_domain_list, &bandwidth_limiter).await?;
@@ -144,12 +146,30 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
     println!("子域名查询数量: {}", count);
 
     // 启动超时和重试处理任务
-    start_timeout_handler(running.clone(), senddog.clone(), retry_send).await;
-    start_retry_handler(running.clone(), senddog.clone(), retry_recv).await;
+    let timeout_handler_handle = start_timeout_handler(running.clone(), senddog.clone(), retry_send).await;
+    let retry_handler_handle = start_retry_handler(running.clone(), senddog.clone(), retry_recv).await;
 
     // 等待所有查询完成
     wait_for_completion().await;
+    
+    // 设置停止标志
     running.store(false, Ordering::Relaxed);
+    
+    // 等待异步任务优雅退出
+    println!("等待后台任务退出...");
+    
+    // 等待所有异步任务完成，设置超时以避免无限等待
+    println!("等待异步任务完成...");
+    
+    // 逐个等待任务完成，设置超时
+    let timeout_duration = Duration::from_secs(5);
+    
+    let _ = tokio::time::timeout(timeout_duration, packet_receiver_handle).await;
+    let _ = tokio::time::timeout(timeout_duration, dns_handler_handle).await;
+    let _ = tokio::time::timeout(timeout_duration, timeout_handler_handle).await;
+    let _ = tokio::time::timeout(timeout_duration, retry_handler_handle).await;
+    
+    println!("异步任务等待完成");
 
     // 获取发现的域名
     let discovered = handle::get_discovered_domains();
@@ -178,8 +198,28 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
         export_results(discovered, verification_results, summary, &output_path, &format)?;
     }
 
+    // 清理全局状态
+    cleanup_global_state();
+    
+    // 给tokio运行时更多时间来清理资源
+    tokio::time::sleep(Duration::from_millis(500)).await;
     println!("完成");
     Ok(())
+}
+
+/// 清理全局状态，释放Arc引用
+fn cleanup_global_state() {
+    // 清空全局静态变量
+    if let Ok(mut status) = LOCAL_STATUS.write() {
+        *status = LocalStruct::new();
+    }
+    
+    if let Ok(mut stack) = LOCAL_STACK.write() {
+        *stack = Stack::new();
+    }
+    
+    // 清理handle模块中的全局状态
+    rsubdomain::handle::cleanup_global_state();
 }
 
 /// 启动网卡收包任务
@@ -187,10 +227,10 @@ async fn start_packet_receiver(
     device: String, 
     dns_send: mpsc::Sender<Arc<Vec<u8>>>, 
     running: Arc<AtomicBool>
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         recv::recv(device, dns_send, running);
-    });
+    })
 }
 
 /// 启动DNS包处理任务
@@ -200,10 +240,10 @@ async fn start_dns_packet_handler(
     running: Arc<AtomicBool>,
     silent: bool,
     state: BruteForceState,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         handle::handle_dns_packet(dns_recv, flag_id, running, silent, state);
-    });
+    })
 }
 
 /// 发送DNS查询
@@ -298,10 +338,10 @@ async fn start_timeout_handler(
     running: Arc<AtomicBool>,
     senddog: Arc<Mutex<SendDog>>,
     retry_send: mpsc::Sender<Arc<RwLock<RetryStruct>>>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         handle_timeout_domains(running, senddog, retry_send).await;
-    });
+    })
 }
 
 /// 处理超时域名（重用原有逻辑）
@@ -313,13 +353,32 @@ async fn handle_timeout_domains(
     while running.load(Ordering::Relaxed) {
         let mut is_delay = true;
         let mut datas = Vec::new();
-        match LOCAL_STATUS.write() {
-            Ok(mut local_status) => {
-                let max_length = (1000000 / 10) as usize;
-                datas = local_status.get_timeout_data(max_length);
-                is_delay = datas.len() > 100;
+        
+        // 在独立的作用域中获取数据，确保锁在await之前释放
+        let lock_failed = {
+            match LOCAL_STATUS.write() {
+                Ok(mut local_status) => {
+                    let max_length = (1000000 / 10) as usize;
+                    datas = local_status.get_timeout_data(max_length);
+                    is_delay = datas.len() > 100;
+                    false
+                }
+                Err(_) => {
+                    true
+                }
             }
-            Err(_) => (),
+        };
+        
+        if lock_failed {
+            // 如果无法获取写锁，等待一段时间后继续
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+        
+        // 如果没有超时数据，短暂休眠后继续
+        if datas.is_empty() {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
         }
 
         for local_data in datas {
@@ -327,29 +386,34 @@ async fn handle_timeout_domains(
             let mut value = local_data.v;
 
             if value.retry >= 5 {
-                match LOCAL_STATUS.write() {
-                    Ok(mut local_status) => {
-                        match local_status.search_from_index_and_delete(index as u32) {
-                            Ok(data) => {
-                                println!("删除失败项:{:?}", data.v);
+                {
+                    match LOCAL_STATUS.write() {
+                        Ok(mut local_status) => {
+                            match local_status.search_from_index_and_delete(index as u32) {
+                                Ok(data) => {
+                                    println!("删除失败项:{:?}", data.v);
+                                }
+                                Err(_) => (),
                             }
-                            Err(_) => (),
                         }
-                        continue;
+                        Err(_) => (),
                     }
-                    Err(_) => (),
                 }
+                continue;
             }
             
-            let senddog = senddog.lock().unwrap();
+            let dns_name = {
+                let senddog = senddog.lock().unwrap();
+                senddog.chose_dns()
+            };
             value.retry += 1;
             value.time = chrono::Utc::now().timestamp() as u64;
-            value.dns = senddog.chose_dns();
+            value.dns = dns_name;
             let value_c = value.clone();
             {
                 match LOCAL_STATUS.write() {
                     Ok(mut local_status) => {
-                        local_status.search_from_index_and_delete(index);
+                        let _ = local_status.search_from_index_and_delete(index);
                         local_status.append(value_c, index);
                     }
                     Err(_) => {}
@@ -369,7 +433,7 @@ async fn handle_timeout_domains(
 
             if is_delay {
                 let sleep_duration = rand::thread_rng().gen_range(100..=400);
-                sleep(Duration::from_micros(sleep_duration));
+                tokio::time::sleep(Duration::from_micros(sleep_duration)).await;
             }
         }
     }
@@ -380,10 +444,10 @@ async fn start_retry_handler(
     running: Arc<AtomicBool>,
     senddog: Arc<Mutex<SendDog>>,
     retry_recv: mpsc::Receiver<Arc<RwLock<RetryStruct>>>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         handle_retry_domains(running, senddog, retry_recv).await;
-    });
+    })
 }
 
 /// 处理重试域名（重用原有逻辑）
@@ -393,35 +457,76 @@ async fn handle_retry_domains(
     retry_recv: mpsc::Receiver<Arc<RwLock<RetryStruct>>>,
 ) {
     while running.load(Ordering::Relaxed) {
-        match retry_recv.recv() {
+        match retry_recv.recv_timeout(Duration::from_millis(1000)) {
             Ok(res) => {
-                let rety_data = res.read().unwrap();
-                let senddog = senddog.lock().unwrap();
-
-                senddog.send(
-                    rety_data.domain.clone(),
-                    rety_data.dns.clone(),
-                    rety_data.src_port,
-                    rety_data.flag_id,
-                )
+                match res.read() {
+                    Ok(rety_data) => {
+                        match senddog.lock() {
+                            Ok(senddog) => {
+                                senddog.send(
+                                    rety_data.domain.clone(),
+                                    rety_data.dns.clone(),
+                                    rety_data.src_port,
+                                    rety_data.flag_id,
+                                )
+                            }
+                            Err(_) => {
+                                println!("警告: 无法获取senddog锁");
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        println!("警告: 无法读取重试数据");
+                    }
+                }
             }
-            Err(_) => (),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // 超时是正常的，继续循环
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // 通道已断开，退出循环
+                break;
+            }
         }
     }
 }
 
 /// 等待所有查询完成
 async fn wait_for_completion() {
+    let start_time = std::time::Instant::now();
+    let max_wait_time = Duration::from_secs(300); // 最大等待5分钟
+    let mut consecutive_empty_checks = 0;
+    let required_consecutive_checks = 5; // 需要连续5次检查都为空才确认完成
+    
     loop {
+        // 检查是否超时
+        if start_time.elapsed() > max_wait_time {
+            println!("警告: 等待超时，强制退出等待循环");
+            break;
+        }
+        
         match LOCAL_STATUS.read() {
             Ok(local_status) => {
                 if local_status.empty() {
+                    consecutive_empty_checks += 1;
+                    if consecutive_empty_checks >= required_consecutive_checks {
+                        println!("所有查询已完成");
+                        break;
+                    }
+                } else {
+                    consecutive_empty_checks = 0;
+                }
+            }
+            Err(_) => {
+                println!("警告: 无法读取LOCAL_STATUS，可能发生死锁");
+                consecutive_empty_checks += 1;
+                if consecutive_empty_checks >= required_consecutive_checks {
                     break;
                 }
             }
-            Err(_) => (),
         }
-        sleep(Duration::from_millis(1000))
+        tokio::time::sleep(Duration::from_millis(1000)).await
     }
 }
 

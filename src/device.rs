@@ -15,7 +15,8 @@ use std::{
     net::IpAddr,
     process::Command,
     sync::mpsc::{Receiver, Sender},
-    
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    time::Duration,
 };
 
 use crate::model::EthTable;
@@ -125,7 +126,7 @@ fn get_gateway_mac(interface_name: &str) -> Option<pnet::util::MacAddr> {
 }
 
 /// 自动检测并选择最佳网络设备
-pub fn auto_get_devices() -> EthTable {
+pub async fn auto_get_devices() -> EthTable {
     let interfaces = datalink::interfaces();
 
     // for iface in interfaces.clone(){
@@ -136,6 +137,11 @@ pub fn auto_get_devices() -> EthTable {
     let domain = random_str(4) + ".example.com";
 
     println!("test domain:{}", domain);
+    
+    // 创建一个停止标志，用于通知所有任务停止
+    let stop_signal = Arc::new(AtomicBool::new(false));
+    let mut handles = Vec::new();
+    
     for interface in interfaces {
         if !interface.is_loopback(){
             for ip in interface.ips.clone() {
@@ -145,9 +151,17 @@ pub fn auto_get_devices() -> EthTable {
                         let interface_clone = interface.clone();
                         let interface_name = interface.name.clone();
                         let mptx_clone = mptx.clone();
-                        tokio::spawn(async move {
+                        let stop_signal_clone = stop_signal.clone();
+                        
+                        // 配置datalink通道，添加超时
+                        let config = datalink::Config {
+                            read_timeout: Some(Duration::from_millis(500)),
+                            ..Default::default()
+                        };
+                        
+                        let handle = tokio::spawn(async move {
                             let (_, mut rx) =
-                                match datalink::channel(&interface_clone, Default::default()) {
+                                match datalink::channel(&interface_clone, config) {
                                     Ok(Ethernet(_tx, _rx)) => (_tx, _rx),
                                     Ok(_) => panic!("Unhandled channel type"),
                                     Err(e) => panic!(
@@ -155,138 +169,181 @@ pub fn auto_get_devices() -> EthTable {
                                         e
                                     ),
                                 };
-                            loop {
+                            // 设置最大循环次数，避免无限循环
+                            let mut loop_count = 0;
+                            const MAX_LOOPS: usize = 100;
+                            
+                            while !stop_signal_clone.load(Ordering::Relaxed) && loop_count < MAX_LOOPS {
+                                loop_count += 1;
+                                
                                 match rx.next() {
                                     Ok(packet) => {
-                                        let ethernet = EthernetPacket::new(packet).unwrap();
-                                        match ethernet.get_ethertype() {
-                                            EtherTypes::Ipv4 => {
-                                                let ipv4_packet =
-                                                    Ipv4Packet::new(ethernet.payload()).unwrap();
-                                                match ipv4_packet.get_next_level_protocol() {
-                                                    IpNextHeaderProtocols::Udp => {
-                                                        let udp_packet =
-                                                            UdpPacket::new(ipv4_packet.payload())
-                                                                .unwrap();
-
-                                                        if udp_packet.get_source() != 53 {
-                                                            continue;
-                                                        }
-
-                                                        if let Some(dns) =
-                                                            DnsPacket::new(udp_packet.payload())
-                                                        {
-                                                            for query in dns.get_queries() {
-                                                                let recv_domain =
-                                                                    query.get_qname_parsed();
-                                                                if recv_domain
-                                                                    .contains(&domain_clone)
-                                                                {
-                                                                    let ipv4 = match ip.ip() {
-                                                                            IpAddr::V4(addr) => addr,
-                                                                            IpAddr::V6(_) => panic!("Expected an IPv4 address, got an IPv6 address"),
-                                                                        };
-                                                                    if let Err(err) = mptx_clone
-                                                                        .send(EthTable {
-                                                                            src_ip: ipv4,
-                                                                            device: interface_name,
-                                                                            src_mac: ethernet
-                                                                                .get_destination(),
-                                                                            dst_mac: ethernet
-                                                                                .get_source(),
-                                                                        })
-                                                                    {
-                                                                        println!("An error occurred when sending the message: {}", err);
+                                        if let Some(ethernet) = EthernetPacket::new(packet) {
+                                            match ethernet.get_ethertype() {
+                                                EtherTypes::Ipv4 => {
+                                                    if let Some(ipv4_packet) = Ipv4Packet::new(ethernet.payload()) {
+                                                        match ipv4_packet.get_next_level_protocol() {
+                                                            IpNextHeaderProtocols::Udp => {
+                                                                if let Some(udp_packet) = UdpPacket::new(ipv4_packet.payload()) {
+                                                                    if udp_packet.get_source() != 53 {
+                                                                        continue;
                                                                     }
-                                                                    return;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    _ => (),
-                                                }
-                                            }
-                                            EtherTypes::Ipv6 => {
-                                                let ipv6_packet =
-                                                    Ipv6Packet::new(ethernet.payload());
-                                                if let Some(header) = ipv6_packet {
-                                                    match header.get_next_header() {
-                                                        IpNextHeaderProtocols::Udp => {
-                                                            let udp_packet =
-                                                                UdpPacket::new(header.payload())
-                                                                    .unwrap();
 
-                                                            if udp_packet.get_source() != 53 {
-                                                                continue;
-                                                            }
-
-                                                            if let Some(dns) =
-                                                                DnsPacket::new(udp_packet.payload())
-                                                            {
-                                                                for query in dns.get_queries() {
-                                                                    let recv_domain =
-                                                                        query.get_qname_parsed();
-                                                                    if recv_domain
-                                                                        .contains(&domain_clone)
-                                                                    {
-                                                                        println!("auto_get_device get domain:{}",recv_domain);
-                                                                        let ipv4 = match ip.ip() {
-                                                                        IpAddr::V4(addr) => addr,
-                                                                        IpAddr::V6(_) => panic!("Expected an IPv4 address, got an IPv6 address"),
-                                                                    };
-                                                                        if let Err(err) = mptx_clone
-                                                                        .send(EthTable {
-                                                                            src_ip: ipv4,
-                                                                            device: interface_name,
-                                                                            src_mac: ethernet
-                                                                                .get_destination(),
-                                                                            dst_mac: ethernet
-                                                                                .get_source(),
-                                                                        })
-                                                                    {
-                                                                        println!("An error occurred when sending the message: {}", err);
-                                                                    }
-                                                                        return;
+                                                                    if let Some(dns) = DnsPacket::new(udp_packet.payload()) {
+                                                                        for query in dns.get_queries() {
+                                                                            let recv_domain = query.get_qname_parsed();
+                                                                            if recv_domain.contains(&domain_clone) {
+                                                                                let ipv4 = match ip.ip() {
+                                                                                    IpAddr::V4(addr) => addr,
+                                                                                    IpAddr::V6(_) => panic!("Expected an IPv4 address, got an IPv6 address"),
+                                                                                };
+                                                                                
+                                                                                if let Err(err) = mptx_clone.send(EthTable {
+                                                                                    src_ip: ipv4,
+                                                                                    device: interface_name,
+                                                                                    src_mac: ethernet.get_destination(),
+                                                                                    dst_mac: ethernet.get_source(),
+                                                                                }) {
+                                                                                    println!("An error occurred when sending the message: {}", err);
+                                                                                }
+                                                                                
+                                                                                // 设置停止标志，通知其他任务停止
+                                                                                stop_signal_clone.store(true, Ordering::Relaxed);
+                                                                                
+                                                                                // 显式释放资源
+                                                                                println!("[DEBUG] Dropping rx in auto_get_devices");
+                                                                                drop(rx);
+                                                                                return;
+                                                                            }
+                                                                        }
                                                                     }
                                                                 }
                                                             }
+                                                            _ => (),
                                                         }
-                                                        _ => (),
                                                     }
                                                 }
+                                                EtherTypes::Ipv6 => {
+                                                    if let Some(ipv6_packet) = Ipv6Packet::new(ethernet.payload()) {
+                                                        match ipv6_packet.get_next_header() {
+                                                            IpNextHeaderProtocols::Udp => {
+                                                                if let Some(udp_packet) = UdpPacket::new(ipv6_packet.payload()) {
+                                                                    if udp_packet.get_source() != 53 {
+                                                                        continue;
+                                                                    }
+
+                                                                    if let Some(dns) = DnsPacket::new(udp_packet.payload()) {
+                                                                        for query in dns.get_queries() {
+                                                                            let recv_domain = query.get_qname_parsed();
+                                                                            if recv_domain.contains(&domain_clone) {
+                                                                                println!("auto_get_device get domain:{}",recv_domain);
+                                                                                let ipv4 = match ip.ip() {
+                                                                                    IpAddr::V4(addr) => addr,
+                                                                                    IpAddr::V6(_) => panic!("Expected an IPv4 address, got an IPv6 address"),
+                                                                                };
+                                                                                
+                                                                                if let Err(err) = mptx_clone.send(EthTable {
+                                                                                    src_ip: ipv4,
+                                                                                    device: interface_name,
+                                                                                    src_mac: ethernet.get_destination(),
+                                                                                    dst_mac: ethernet.get_source(),
+                                                                                }) {
+                                                                                    println!("An error occurred when sending the message: {}", err);
+                                                                                }
+                                                                                
+                                                                                // 设置停止标志，通知其他任务停止
+                                                                                stop_signal_clone.store(true, Ordering::Relaxed);
+                                                                                
+                                                                                // 显式释放资源
+                                                                                println!("[DEBUG] Dropping rx in auto_get_devices");
+                                                                                drop(rx);
+                                                                                return;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            _ => (),
+                                                        }
+                                                    }
+                                                }
+                                                _ => {}
                                             }
-                                            _ => {}
                                         }
                                     }
                                     Err(e) => {
-                                        println!(
-                                            "An error occurred when reading from the datalink channel: {}",
-                                            e
-                                        );
+                                        // 检查是否是超时错误（这是正常的）
+                                        if e.kind() == std::io::ErrorKind::TimedOut {
+                                            // 超时是正常的，继续循环
+                                            continue;
+                                        }
+                                        
+                                        println!("An error occurred when reading from the datalink channel: {}", e);
                                         continue;
                                     }
                                 }
                             }
+                            
+                            // 循环结束后显式释放资源
+                            println!("[DEBUG] Dropping rx after loop in auto_get_devices");
+                            drop(rx);
                         });
+                        
+                        handles.push(handle);
                     }
                     _ => (),
                 }
             }
         }
     }
-    // thread::sleep(Duration::from_millis(3000));
+    // 执行nslookup命令触发DNS查询
     Command::new("nslookup")
-        .arg(domain)
+        .arg(&domain)
         .output()
         .expect("failed to execute process");
-
-    match mprx.recv() {
+    
+    // 设置接收超时，避免无限等待
+    let result = mprx.recv_timeout(Duration::from_secs(3));
+    
+    // 设置停止标志，通知所有任务停止
+    stop_signal.store(true, Ordering::Relaxed);
+    
+    // 等待所有任务完成或超时
+     let timeout_future = tokio::time::timeout(Duration::from_secs(1), async {
+         for handle in handles {
+             let _ = handle.await;
+         }
+     });
+     let _ = timeout_future.await;
+    
+    // 处理接收结果
+    match result {
         Ok(eth) => {
             // println!("eth: {:?}", eth);
             eth
         }
         Err(e) => {
-            panic!("recv error:{}", e)
+            // 如果接收超时，返回默认网络设备
+            println!("自动检测网络设备超时: {}, 使用默认设备", e);
+            let default_interface = datalink::interfaces()
+                .into_iter()
+                .find(|iface| !iface.is_loopback() && !iface.ips.is_empty())
+                .expect("No suitable network interface found");
+                
+            let default_ip = default_interface.ips.iter()
+                .find(|ip| ip.ip().is_ipv4())
+                .expect("No IPv4 address found")
+                .ip();
+                
+            EthTable {
+                src_ip: match default_ip {
+                    IpAddr::V4(addr) => addr,
+                    _ => panic!("Expected IPv4 address")
+                },
+                device: default_interface.name,
+                src_mac: default_interface.mac.unwrap_or_default(),
+                dst_mac: pnet::util::MacAddr::zero(),
+            }
         }
     }
 }

@@ -1,7 +1,8 @@
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc, Arc, Mutex,
+    mpsc::{self, RecvTimeoutError}, Arc, Mutex,
 };
+use std::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, IpAddr};
 use std::fmt;
@@ -88,8 +89,13 @@ pub fn handle_dns_packet(
     let mut ip_list: Vec<String> = Vec::new();
 
     while running.load(Ordering::Relaxed) {
-        match dns_recv.recv() {
+        match dns_recv.recv_timeout(Duration::from_millis(500)) {
             Ok(ipv4_packet) => {
+                // 在处理数据包前再次检查运行状态
+                if !running.load(Ordering::Relaxed) {
+                    break;
+                }
+                
                 if let Some(ipv4) = Ipv4Packet::new(ipv4_packet.as_ref()) {
                     if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Udp {
                         if let Some(udp) = UdpPacket::new(ipv4.payload()) {
@@ -108,9 +114,18 @@ pub fn handle_dns_packet(
                     }
                 }
             }
-            Err(_) => (),
+            Err(RecvTimeoutError::Timeout) => {
+                // 超时是正常的，继续循环检查running标志
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                // 通道已断开，退出循环
+                break;
+            }
         }
     }
+    
+    println!("DNS packet handler thread exiting");
 }
 
 /// 处理DNS响应
@@ -496,6 +511,17 @@ pub fn clear_discovered_domains() {
 
 /// 清空验证结果列表
 pub fn clear_verification_results() {
+    if let Ok(mut results) = VERIFICATION_RESULTS.lock() {
+        results.clear();
+    }
+}
+
+/// 清理全局状态
+pub fn cleanup_global_state() {
+    if let Ok(mut domains) = DISCOVERED_DOMAINS.lock() {
+        domains.clear();
+    }
+    
     if let Ok(mut results) = VERIFICATION_RESULTS.lock() {
         results.clear();
     }

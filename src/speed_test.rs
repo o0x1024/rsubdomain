@@ -24,12 +24,12 @@ pub struct SpeedTester {
 }
 
 impl SpeedTester {
-    pub fn new() -> Self {
-        Self::new_with_target("8.8.8.8")
+    pub async fn new() -> Self {
+        Self::new_with_target("8.8.8.8").await
     }
 
-    pub fn new_with_target(target_ip: &str) -> Self {
-        let ether = device::auto_get_devices();
+    pub async fn new_with_target(target_ip: &str) -> Self {
+        let ether = device::auto_get_devices().await;
         let mut rng = rand::thread_rng();
         let flag_id = rng.gen_range(400..655);
         
@@ -166,4 +166,4 @@ impl BandwidthLimiter {
             false
         }
     }
-} 
+}

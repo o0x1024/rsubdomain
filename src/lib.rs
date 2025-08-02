@@ -9,28 +9,42 @@
 //! - 📊 **多格式输出**: 支持JSON、XML、CSV、TXT四种输出格式
 //! - 🌐 **智能网络**: 自动检测网络设备，支持手动指定网络接口
 //! - 📈 **网速测试**: 内置DNS包发送速度测试功能
+//! - 🎯 **泛解析检测**: 智能识别并处理泛解析域名
+//! - ⚡ **带宽控制**: 支持带宽限制，避免网络拥塞
+//! - 🔄 **智能重试**: 自动处理超时和失败的DNS查询
 //! 
 //! ## 快速开始
 //! 
+//! ### 方法1: 使用便捷函数
+//! 
 //! ```rust,no_run
-//! use rsubdomain::{brute_force_subdomains, SubdomainBruteConfig, SubdomainBruteEngine};
+//! use rsubdomain::brute_force_subdomains;
 //! 
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // 基本使用
 //!     let domains = vec!["example.com".to_string()];
-//!     let results = brute_force_subdomains(domains, None).await?;
+//!     let results = brute_force_subdomains(
+//!         domains,
+//!         None,           // dictionary_file
+//!         None,           // resolvers
+//!         true,           // skip_wildcard
+//!         None,           // bandwidth_limit
+//!         false,          // verify_mode
+//!         false,          // resolve_records
+//!         false,          // silent
+//!         None,           // device
+//!     ).await?;
 //!     
 //!     println!("发现 {} 个子域名", results.len());
-//!     for result in results.iter().take(5) {
-//!         println!("  {} -> {}", result.domain, result.ip);
+//!     for result in results.iter().take(3) {
+//!         println!("  {} -> {} ({})", result.domain, result.ip, result.record_type);
 //!     }
 //!     
 //!     Ok(())
 //! }
 //! ```
 //! 
-//! ## 高级配置
+//! ### 方法2: 使用配置引擎
 //! 
 //! ```rust,no_run
 //! use rsubdomain::{SubdomainBruteConfig, SubdomainBruteEngine};
@@ -41,6 +55,7 @@
 //!         domains: vec!["example.com".to_string()],
 //!         verify_mode: true,      // 启用HTTP/HTTPS验证
 //!         resolve_records: true,  // 启用DNS记录解析
+//!         bandwidth_limit: Some("5M".to_string()), // 带宽限制
 //!         silent: false,
 //!         ..Default::default()
 //!     };
@@ -48,7 +63,83 @@
 //!     let engine = SubdomainBruteEngine::new(config).await?;
 //!     let results = engine.run_brute_force().await?;
 //!     
-//!     // 处理结果...
+//!     println!("发现 {} 个子域名", results.len());
+//!     for result in results.iter().take(3) {
+//!         println!("  {} -> {} ({})", result.domain, result.ip, result.record_type);
+//!         if let Some(verified) = &result.verified {
+//!             println!("    HTTP: {}, HTTPS: {}, HTTP存活: {}, HTTPS存活: {}", 
+//!                 verified.http_status.unwrap_or(0),
+//!                 verified.https_status.unwrap_or(0),
+//!                 verified.http_alive,
+//!                 verified.https_alive
+//!             );
+//!         }
+//!     }
+//!     
+//!     Ok(())
+//! }
+//! ```
+//! 
+//! ## 高级功能
+//! 
+//! ### 带宽控制和网速测试
+//! 
+//! ```rust,no_run
+//! use rsubdomain::{run_speed_test, brute_force_subdomains};
+//! 
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // 网速测试（5秒）
+//!     run_speed_test(5).await?;
+//!     
+//!     // 使用带宽限制进行子域名扫描
+//!     let domains = vec!["example.com".to_string()];
+//!     let results = brute_force_subdomains(
+//!         domains,
+//!         None,
+//!         None,
+//!         true,
+//!         Some("3M".to_string()), // 限制带宽为3M
+//!         false,
+//!         false,
+//!         false,
+//!         None,
+//!     ).await?;
+//!     
+//!     println!("发现 {} 个子域名", results.len());
+//!     
+//!     Ok(())
+//! }
+//! ```
+//! 
+//! ### 使用自定义字典
+//! 
+//! ```rust,no_run
+//! use rsubdomain::brute_force_subdomains_with_dict;
+//! 
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let domains = vec!["example.com".to_string()];
+//!     let dictionary = vec![
+//!         "www".to_string(),
+//!         "mail".to_string(),
+//!         "ftp".to_string(),
+//!         "api".to_string(),
+//!     ];
+//!     
+//!     let results = brute_force_subdomains_with_dict(
+//!         domains,
+//!         dictionary,
+//!         None,  // resolvers
+//!         true,  // skip_wildcard
+//!         None,  // bandwidth_limit
+//!         false, // verify_mode
+//!         false, // resolve_records
+//!         false, // silent
+//!         None,  // device
+//!     ).await?;
+//!     
+//!     println!("使用自定义字典发现 {} 个子域名", results.len());
 //!     
 //!     Ok(())
 //! }
@@ -85,6 +176,8 @@ pub use api::{
     SubdomainResult, 
     SubdomainBruteEngine,
     brute_force_subdomains,
+    brute_force_subdomains_with_dict,
+    brute_force_subdomains_with_config,
     run_speed_test
 };
 

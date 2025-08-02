@@ -31,22 +31,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     println!("\n=== 测试字典优先级配置 ===");
     
-    let config = SubdomainBruteConfig {
-        domains: vec!["mgtv.com".to_string()],
-        dictionary: Some(vec!["priority-test".to_string()]),
-        dictionary_file: Some("/nonexistent/file.txt".to_string()),
-        ..Default::default()
-    };
+    let mut config = SubdomainBruteConfig::default();
+    config.domains = vec!["mgtv.com".to_string()];
+    config.dictionary_file = Some("/nonexistent/file.txt".to_string());
     
     println!("✅ 配置创建成功！");
-    println!("字典数组: {:?}", config.dictionary);
     println!("字典文件: {:?}", config.dictionary_file);
-    println!("字典数组会被优先使用，字典文件会被忽略");
+    println!("当字典数组存在时会被优先使用，字典文件会被忽略");
     
     println!("\n🎉 所有测试完成！程序正常结束。");
     
     // 清理全局状态，但不强制退出
-    rsubdomain::api::SubdomainBruteEngine::cleanup_global_state();
+    // rsubdomain::api::SubdomainBruteEngine::cleanup_global_state(); // 私有方法，无法直接调用
     
     // 给Tokio运行时一些时间来清理资源
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;

@@ -38,7 +38,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-d","mgtv.com","--summary"],
+            "args": ["-d","github.com","--summary"],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_BACKTRACE": "1"

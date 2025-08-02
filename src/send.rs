@@ -78,7 +78,7 @@ impl SendDog {
 
     pub fn chose_dns(&self) -> String {
         let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..self.dns.len() - 1);
+        let index = rng.gen_range(0..self.dns.len());
         self.dns[index].to_owned()
     }
 
