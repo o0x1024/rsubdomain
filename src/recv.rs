@@ -64,7 +64,6 @@ pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<A
             }
         }
         println!("Packet capture thread exiting");
-        println!("[DEBUG] Dropping rx in capture thread");
         drop(rx);
     });
     

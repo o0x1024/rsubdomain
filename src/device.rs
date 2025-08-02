@@ -211,7 +211,6 @@ pub async fn auto_get_devices() -> EthTable {
                                                                                 stop_signal_clone.store(true, Ordering::Relaxed);
                                                                                 
                                                                                 // 显式释放资源
-                                                                                println!("[DEBUG] Dropping rx in auto_get_devices");
                                                                                 drop(rx);
                                                                                 return;
                                                                             }
@@ -255,7 +254,6 @@ pub async fn auto_get_devices() -> EthTable {
                                                                                 stop_signal_clone.store(true, Ordering::Relaxed);
                                                                                 
                                                                                 // 显式释放资源
-                                                                                println!("[DEBUG] Dropping rx in auto_get_devices");
                                                                                 drop(rx);
                                                                                 return;
                                                                             }
@@ -285,7 +283,6 @@ pub async fn auto_get_devices() -> EthTable {
                             }
                             
                             // 循环结束后显式释放资源
-                            println!("[DEBUG] Dropping rx after loop in auto_get_devices");
                             drop(rx);
                         });
                         
