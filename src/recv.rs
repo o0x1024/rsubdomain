@@ -63,7 +63,6 @@ pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<A
                 }
             }
         }
-        println!("Packet capture thread exiting");
         drop(rx);
     });
     
@@ -119,7 +118,4 @@ pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<A
     if let Err(e) = capture_handle.join() {
         println!("Warning: Failed to join packet capture thread: {:?}", e);
     }
-    
-    println!("[DEBUG] All recv resources dropped, thread exiting");
-    println!("Packet receiver thread exiting");
 }

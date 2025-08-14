@@ -125,7 +125,6 @@ pub fn handle_dns_packet(
         }
     }
     
-    println!("DNS packet handler thread exiting");
 }
 
 /// 处理DNS响应
