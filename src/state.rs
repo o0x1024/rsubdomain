@@ -1,16 +1,15 @@
 //! 线程安全的状态管理模块
-//! 
+//!
 //! 这个模块提供了线程安全的状态管理结构，替代原有的全局静态变量。
 //! 每个SubdomainBruteEngine实例都有自己独立的状态，确保线程安全。
 
-use std::sync::{Arc, Mutex, RwLock};
-use std::collections::HashMap;
 use crate::handle::{DiscoveredDomain, VerificationResult};
 use crate::local_struct::LocalStruct;
 use crate::stack::Stack;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// 暴破引擎的状态管理器
-/// 
+///
 /// 包含了域名暴破过程中需要的所有状态信息，
 /// 每个SubdomainBruteEngine实例都有独立的状态。
 #[derive(Debug, Clone)]
@@ -49,6 +48,15 @@ impl BruteForceState {
             domains.clone()
         } else {
             Vec::new()
+        }
+    }
+
+    /// 获取当前已发现域名数量
+    pub fn discovered_domain_count(&self) -> usize {
+        if let Ok(domains) = self.discovered_domains.lock() {
+            domains.len()
+        } else {
+            0
         }
     }
 
@@ -91,7 +99,10 @@ impl BruteForceState {
     }
 
     /// 获取超时数据
-    pub fn get_timeout_data(&self, max_length: usize) -> Vec<crate::local_struct::LocalRetryStruct> {
+    pub fn get_timeout_data(
+        &self,
+        max_length: usize,
+    ) -> Vec<crate::local_struct::LocalRetryStruct> {
         match self.local_status.write() {
             Ok(mut local_status) => local_status.get_timeout_data(max_length),
             Err(_) => Vec::new(),
@@ -99,16 +110,18 @@ impl BruteForceState {
     }
 
     /// 从索引搜索并删除
-    pub fn search_from_index_and_delete(&self, index: u32) -> Result<crate::local_struct::LocalRetryStruct, Box<dyn std::error::Error>> {
+    pub fn search_from_index_and_delete(
+        &self,
+        index: u32,
+    ) -> Result<crate::local_struct::LocalRetryStruct, Box<dyn std::error::Error>> {
         match self.local_status.write() {
-            Ok(mut local_status) => {
-                local_status.search_from_index_and_delete(index)
-                    .map_err(|e| e)
-            }
+            Ok(mut local_status) => local_status
+                .search_from_index_and_delete(index)
+                .map_err(|e| e),
             Err(e) => Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Failed to acquire write lock: {}", e)
-            )))
+                format!("Failed to acquire write lock: {}", e),
+            ))),
         }
     }
 
@@ -121,10 +134,29 @@ impl BruteForceState {
 
     /// 推送到本地栈
     pub fn push_to_stack(&self, index: usize) {
-        if let Ok(mut stack) = self.local_stack.try_write() {
+        if let Ok(mut stack) = self.local_stack.write() {
             if stack.length <= 50000 {
                 stack.push(index);
             }
+        }
+    }
+
+    /// 从回收栈中弹出一个索引
+    pub fn pop_from_stack(&self) -> Option<usize> {
+        match self.local_stack.write() {
+            Ok(mut stack) => stack.pop(),
+            Err(_) => None,
+        }
+    }
+
+    /// 清空实例内的查询状态
+    pub fn clear_query_state(&self) {
+        if let Ok(mut local_status) = self.local_status.write() {
+            *local_status = LocalStruct::new();
+        }
+
+        if let Ok(mut local_stack) = self.local_stack.write() {
+            *local_stack = Stack::new();
         }
     }
 }
@@ -135,15 +167,11 @@ impl Default for BruteForceState {
     }
 }
 
-// 确保BruteForceState是线程安全的
-unsafe impl Send for BruteForceState {}
-unsafe impl Sync for BruteForceState {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
     use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn test_thread_safety() {
@@ -157,6 +185,7 @@ mod tests {
                 let domain = DiscoveredDomain {
                     domain: format!("test{}.example.com", i),
                     ip: format!("192.168.1.{}", i),
+                    query_type: crate::QueryType::A,
                     record_type: "A".to_string(),
                     timestamp: chrono::Utc::now().timestamp() as u64,
                 };
@@ -183,6 +212,7 @@ mod tests {
         let domain1 = DiscoveredDomain {
             domain: "test1.example.com".to_string(),
             ip: "192.168.1.1".to_string(),
+            query_type: crate::QueryType::A,
             record_type: "A".to_string(),
             timestamp: chrono::Utc::now().timestamp() as u64,
         };
@@ -190,6 +220,7 @@ mod tests {
         let domain2 = DiscoveredDomain {
             domain: "test2.example.com".to_string(),
             ip: "192.168.1.2".to_string(),
+            query_type: crate::QueryType::A,
             record_type: "A".to_string(),
             timestamp: chrono::Utc::now().timestamp() as u64,
         };
@@ -199,6 +230,9 @@ mod tests {
 
         assert_eq!(state1.get_discovered_domains().len(), 1);
         assert_eq!(state2.get_discovered_domains().len(), 1);
-        assert_ne!(state1.get_discovered_domains()[0].domain, state2.get_discovered_domains()[0].domain);
+        assert_ne!(
+            state1.get_discovered_domains()[0].domain,
+            state2.get_discovered_domains()[0].domain
+        );
     }
 }

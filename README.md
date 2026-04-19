@@ -48,8 +48,29 @@ cargo build --release
 # 使用自定义字典文件
 ./rsubdomain -d example.com -f wordlist.txt
 
+# 从文件读取目标域名
+./rsubdomain --domain-file domains.txt
+
+# 从标准输入读取目标域名
+cat domains.txt | ./rsubdomain --stdin
+
+# 排除不想扫描的域名
+./rsubdomain --domain-file domains.txt --exclude-domain dev.example.com,test.example.com
+
+# 从文件批量排除域名
+./rsubdomain --domain-file domains.txt --exclude-domain-file excludes.txt
+
+# 从文件读取DNS解析器
+./rsubdomain -d example.com --resolver-file resolvers.txt
+
+# 自定义运行期控制
+./rsubdomain -d example.com --retry 3 --wait-seconds 120 --verify-timeout 5 --verify-concurrency 20 -v
+
+# 指定多种查询类型
+./rsubdomain -d example.com --qtype a,aaaa,cname
+
 # 静默模式（只输出发现的域名）
-./rsubdomain -d example.com --slient
+./rsubdomain -d example.com --silent
 
 # 扫描多个域名
 ./rsubdomain -d example.com -d test.com
@@ -81,6 +102,9 @@ cargo build --release
 # DNS记录解析
 ./rsubdomain -d example.com --resolve-records
 
+# 输出原始逐记录结果
+./rsubdomain -d example.com --qtype a,txt --raw-records
+
 # 同时启用验证和解析
 ./rsubdomain -d example.com -v --resolve-records
 ```
@@ -101,6 +125,9 @@ cargo build --release
 
 # 导出为TXT格式
 ./rsubdomain -d example.com -o results.txt --format txt
+
+# 导出包含查询类型的多记录扫描结果
+./rsubdomain -d example.com --qtype a,aaaa,mx -o results.json --format json
 ```
 
 ### 高级用法
@@ -113,31 +140,42 @@ cargo build --release
 
 | 参数 | 长参数 | 描述 | 默认值 |
 |------|--------|------|--------|
-| `-d` | `--domain` | 需要扫描的目标域名（可多个） | 必需 |
+| `-d` | `--domain` | 需要扫描的目标域名（可多个） | 与 `--domain-file` / `--stdin` 三选一即可 |
+| | `--domain-file` | 从文件读取目标域名，每行一个 | - |
+| | `--stdin` | 从标准输入读取目标域名，每行一个 | false |
+| | `--exclude-domain` | 排除的目标域名，可逗号分隔 | - |
+| | `--exclude-domain-file` | 从文件读取排除域名，每行一个 | - |
 | `-l` | `--list-network` | 列出所有网络接口 | - |
 | `-r` | `--resolvers` | DNS解析器路径 | 系统默认DNS |
-| `-s` | `--slient` | 静默模式，只输出域名 | false |
+| | `--resolver-file` | 从文件读取DNS解析器，每行一个 | - |
+| `-s` | `--slient` / `--silent` | 静默模式，只输出域名 | false |
 | `-f` | `--file` | 自定义字典文件路径 | 内置字典 |
 | `-w` | `--skip-wildcard` | 跳过泛解析域名检测 | true |
 | `-n` | `--network-test` | 执行网速测试 | - |
 | | `--target-ip` | 网速测试目标IP | 8.8.8.8 |
 | `-b` | `--bandwidth` | 带宽限制 (K/M/G) | 3M |
 | `-v` | `--verify` | HTTP/HTTPS验证模式 | - |
+| | `--retry` | DNS查询超时后的最大重试次数 | 5 |
+| | `--wait-seconds` | 发包完成后的最大等待时间（秒） | 300 |
+| | `--verify-timeout` | HTTP/HTTPS验证超时时间（秒） | 10 |
+| | `--verify-concurrency` | HTTP/HTTPS验证并发度 | 50 |
 | | `--resolve-records` | 解析DNS记录 | - |
+| | `--qtype` | 主动发送的查询类型，可逗号分隔 (a/aaaa/cname/mx/ns/txt) | a |
 | `-e` | `--device` | 手动指定网络设备 | 自动检测 |
 | `-o` | `--output` | 输出文件路径 | - |
 | | `--format` | 输出格式 (json/xml/csv/txt) | json |
 | | `--summary` | 显示汇总统计 | - |
+| | `--raw-records` | 实时输出逐条DNS记录，而不是聚合视图 | false |
 
 ## 输出示例
 
 ### 标准输出
 ```
-域名                          IP地址          记录类型    时间戳
---------------------------------------------------------------------------------
-www.example.com               93.184.216.34   A          14:23:45
-mail.example.com              93.184.216.35   A          14:23:46
-ftp.example.com               ftp.example.org CNAME      14:23:47
+域名                          查询     IP地址                                         记录类型    时间戳
+------------------------------------------------------------------------------------------------------------------------
+www.example.com               A        93.184.216.34                                   A          14:23:45
+mail.example.com              MX       10 mail.example.com                             MX         14:23:46
+ftp.example.com               CNAME    ftp.example.org                                 CNAME      14:23:47
 ```
 
 ### 验证结果输出
@@ -153,7 +191,8 @@ api.example.com               93.184.216.35   404    N/A    N/A                 
 ============================================================
                     汇总统计
 ============================================================
-发现域名总数: 156
+发现记录总数: 156
+唯一域名数量: 98
 唯一IP数量: 23
 已验证域名: 45
 存活域名: 32
@@ -195,7 +234,7 @@ IP段分布 (前10个):
 
 ## 更新日志
 
-### v1.2.4 (最新)
+### v1.2.13 (最新)
 - 🐛 修复API中`send_dns_queries`方法参数不匹配问题
 - 🐛 修复带宽限制器创建和使用逻辑
 - 🐛 修复超时域名处理中的变量借用问题
@@ -243,13 +282,22 @@ rsubdomain不仅可以作为命令行工具使用，还可以作为Rust库集成
 
 ```toml
 [dependencies]
-# 从本地路径
-rsubdomain = { path = "/path/to/rsubdomain" }
+# 从 crates.io
+rsubdomain = "1.2.13"
 
-# 或从Git仓库
-rsubdomain = { git = "https://github.com/o0x1024/rsubdomain" }
+# 或从本地路径 / Git 仓库
+# rsubdomain = { path = "/path/to/rsubdomain" }
+# rsubdomain = { git = "https://github.com/o0x1024/rsubdomain" }
 
 # 异步运行时（必需）
+tokio = { version = "1.0", features = ["full"] }
+```
+
+如果你只想把它当作库引用，而不需要 CLI / HTTP 验证 / 导出能力，可以关闭默认特性：
+
+```toml
+[dependencies]
+rsubdomain = { version = "1.2.13", default-features = false }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -262,7 +310,17 @@ use rsubdomain::{brute_force_subdomains, SubdomainBruteConfig, SubdomainBruteEng
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 方法1: 使用便捷函数（最简单）
     let domains = vec!["example.com".to_string()];
-    let results = brute_force_subdomains(domains, None).await?;
+    let results = brute_force_subdomains(
+        domains,
+        None,
+        None,
+        true,
+        None,
+        false,
+        false,
+        false,
+        None,
+    ).await?;
     
     println!("发现 {} 个子域名", results.len());
     for result in results.iter().take(5) {
@@ -276,7 +334,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### 高级配置
 
 ```rust
-use rsubdomain::{SubdomainBruteConfig, SubdomainBruteEngine, OutputFormat, export_results};
+use rsubdomain::{export_subdomain_results, OutputFormat, QueryType, SubdomainBruteConfig, SubdomainBruteEngine};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -288,9 +346,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         skip_wildcard: true,
         bandwidth_limit: Some("5M".to_string()),
         verify_mode: true,      // 启用HTTP/HTTPS验证
+        max_retries: 5,
+        max_wait_seconds: 300,
+        verify_timeout_seconds: 10,
+        verify_concurrency: 50,
         resolve_records: true,  // 启用DNS记录解析
+        query_types: vec![QueryType::A, QueryType::Aaaa, QueryType::Cname],
         silent: false,
+        raw_records: false,     // 默认按域名聚合展示
         device: None, // 自动检测网络设备
+        dictionary: None,
+        progress_callback: None,
     };
 
     // 创建暴破引擎
@@ -303,6 +369,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for result in &results {
         println!("域名: {}", result.domain);
         println!("  IP: {}", result.ip);
+        println!("  查询类型: {}", result.query_type);
         println!("  记录类型: {}", result.record_type);
         
         // 验证结果
@@ -320,6 +387,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!();
     }
     
+    export_subdomain_results(&results, "results.json", &OutputFormat::Json)?;
+
     Ok(())
 }
 ```
@@ -330,21 +399,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **`SubdomainBruteConfig`** - 暴破配置
 - `domains: Vec<String>` - 目标域名列表
+  可由 `-d`、`--domain-file`、`--stdin` 组合输入，并在 CLI 层做去重和排除过滤
 - `resolvers: Vec<String>` - DNS服务器列表
+  可由 `-r` 和 `--resolver-file` 组合输入，CLI 层会做归一化和去重
 - `dictionary_file: Option<String>` - 字典文件路径
 - `skip_wildcard: bool` - 是否跳过泛解析检测
 - `bandwidth_limit: Option<String>` - 带宽限制
 - `verify_mode: bool` - 是否启用HTTP/HTTPS验证
+- `max_retries: u8` - DNS超时后的最大重试次数
+- `max_wait_seconds: u64` - 发包结束后的最大等待时间
+- `verify_timeout_seconds: u64` - HTTP/HTTPS验证超时时间
+- `verify_concurrency: usize` - HTTP/HTTPS验证并发度
 - `resolve_records: bool` - 是否解析DNS记录
+- `query_types: Vec<QueryType>` - 主动发送的DNS查询类型
 - `silent: bool` - 静默模式
+- `raw_records: bool` - 是否输出原始逐记录结果
 - `device: Option<String>` - 网络设备名称
 
 **`SubdomainResult`** - 暴破结果
 - `domain: String` - 发现的域名
 - `ip: String` - 对应的IP地址
+- `query_type: QueryType` - 主动查询类型
 - `record_type: String` - DNS记录类型
 - `verified: Option<VerifyResult>` - HTTP/HTTPS验证结果
 - `dns_records: Option<DnsResolveResult>` - DNS记录解析结果
+
+**`SubdomainScanData`** - 从 `SubdomainResult` 派生出的汇总视图
+- `raw_results: Vec<SubdomainResult>` - 保真原始扫描结果，适合 JSON 导出
+- `discovered_domains: Vec<DiscoveredDomain>` - 可展示/导出的发现结果
+- `aggregated_domains: Vec<AggregatedDiscoveredDomain>` - 按域名聚合后的展示结果
+- `verification_results: Vec<VerificationResult>` - HTTP/HTTPS验证结果列表
+- `summary: SummaryStats` - 汇总统计
 
 #### 主要函数
 
@@ -353,6 +438,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 pub async fn brute_force_subdomains(
     domains: Vec<String>,
     dictionary_file: Option<String>,
+    resolvers: Option<Vec<String>>,
+    skip_wildcard: bool,
+    bandwidth_limit: Option<String>,
+    verify_mode: bool,
+    resolve_records: bool,
+    silent: bool,
+    device: Option<String>,
 ) -> Result<Vec<SubdomainResult>, Box<dyn std::error::Error>>
 ```
 
@@ -364,7 +456,9 @@ pub async fn run_speed_test(duration_secs: u64) -> Result<(), Box<dyn std::error
 **`export_results()`** - 结果导出函数
 ```rust
 pub fn export_results(
+    raw_results: Vec<SubdomainResult>,
     discovered: Vec<DiscoveredDomain>,
+    aggregated: Vec<AggregatedDiscoveredDomain>,
     verified: Vec<VerificationResult>,
     summary: SummaryStats,
     output_path: &str,
@@ -372,23 +466,33 @@ pub fn export_results(
 ) -> Result<(), Box<dyn std::error::Error>>
 ```
 
+**`export_subdomain_results()`** - 直接导出扫描结果
+```rust
+pub fn export_subdomain_results(
+    results: &[SubdomainResult],
+    output_path: &str,
+    format: &OutputFormat,
+) -> Result<(), Box<dyn std::error::Error>>
+```
+
+JSON 导出会额外包含：
+- `raw_results`：每条原始扫描记录，包含 `query_type`
+- `aggregated_domains`：按域名聚合后的展示视图
+- `verified` / `dns_records`：在启用对应功能后保留详细结果
+
 ### 完整示例
 
 查看 `examples/` 目录中的完整示例：
 - `examples/quick_start.rs` - 快速入门示例
 - `examples/library_usage.rs` - 完整功能示例
-- `examples/Cargo.toml` - 依赖配置示例
 
 运行示例：
 ```bash
-# 进入示例目录
-cd examples
-
 # 运行快速入门示例
-cargo run --bin quick_start
+cargo run --example quick_start
 
 # 运行完整示例
-cargo run --bin library_usage
+cargo run --example library_usage
 ```
 
 ### 注意事项

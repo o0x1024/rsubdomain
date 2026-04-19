@@ -1,31 +1,28 @@
 use pnet::datalink;
 use pnet::packet::dns::MutableDnsPacket;
 use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
-use pnet::packet::gre::U16BE;
 use pnet::packet::icmp::echo_reply::IcmpCodes;
 use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet::packet::icmp::IcmpTypes;
 use pnet::packet::ipv4::Ipv4Flags::{self, DontFragment};
-use pnet::packet::ipv4:: MutableIpv4Packet;
-use pnet::packet::udp::{self, ipv4_checksum, MutableUdpPacket};
+use pnet::packet::ipv4::MutableIpv4Packet;
+use pnet::packet::udp::{ipv4_checksum, MutableUdpPacket};
 use pnet::packet::{ip::IpNextHeaderProtocols, util, Packet};
-use pnet::transport::{transport_channel, TransportProtocol};
 use pnet::transport::TransportChannelType::Layer4;
+use pnet::transport::{transport_channel, TransportProtocol};
 
 use pnet::datalink::MacAddr;
 
-use rsubdomain::device;
-use rsubdomain::model::EthTable;
+use rsubdomain::{device, EthTable};
 
-use std::borrow::BorrowMut;
 use std::net::Ipv4Addr;
 
 use pnet::datalink::Channel::Ethernet;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 获取网络接口
-    let ether = device::auto_get_devices().await;
+    let ether = device::auto_get_devices().await?;
     println!("{:?}", ether);
     let flg = 2;
 
@@ -37,14 +34,15 @@ async fn main() {
         send_icmp_datalink(ether, "172.31.36.33");
     }
 
+    Ok(())
 }
 const ICMP_SIZE: usize = 40;
 
 fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     let interfaces = datalink::interfaces();
 
-    for itn in interfaces.clone(){
-        println!("{:?}",itn);
+    for itn in interfaces.clone() {
+        println!("{:?}", itn);
     }
 
     let interface = interfaces
@@ -62,7 +60,6 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     let udp_header_len = 8;
 
     let total_length: u16 = (ipv4_header_len + udp_header_len + dns_query_len) as _;
-
 
     // let mut udp_buffer: Vec<u8> = vec![0u8; 42];
     let mut udp_buffer: Vec<u8> = Vec::with_capacity(8 + dns_query_len);
@@ -86,14 +83,12 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     ipv4_header.set_version(4);
     ipv4_header.set_flags(Ipv4Flags::DontFragment);
 
-
     let mut ethernet_buffer = [0u8; 14];
     let mut ethernet_packet = MutableEthernetPacket::new(&mut ethernet_buffer).unwrap();
     ethernet_packet.set_destination(ether.dst_mac);
     // ethernet_packet.set_destination(MacAddr(0xb0,0x7b,0x25,0x24,0x95,0x49));
     ethernet_packet.set_source(interface.mac.unwrap());
     ethernet_packet.set_ethertype(EtherTypes::Ipv4);
-
 
     let checksum = pnet::packet::ipv4::checksum(&ipv4_header.to_immutable());
     ipv4_header.set_checksum(checksum);
@@ -125,10 +120,7 @@ fn send_by_datalink(ether: EthTable, dst_ip: &str) {
     }
 
     println!("--1");
-
 }
-
-
 
 fn send_by_tranport() {
     // 获取网络接口
@@ -145,7 +137,7 @@ fn send_by_tranport() {
 
     let packet = MutableDnsPacket::new(&mut dns_request).unwrap();
 
-    tx.send_to(packet, dsp_ip.parse().unwrap());
+    let _ = tx.send_to(packet, dsp_ip.parse().unwrap());
 
     println!(":123123")
 }
@@ -174,7 +166,6 @@ fn build_dns_query(domain: &str) -> Vec<u8> {
 
     buffer
 }
-
 
 fn send_icmp_datalink(ether: EthTable, dst_ip: &str) {
     let interfaces = datalink::interfaces();
@@ -245,7 +236,7 @@ fn send_icmp_datalink(ether: EthTable, dst_ip: &str) {
     println!("{:?}", final_packet);
 
     // println!("{:?}",final_packet);
-    let (mut tx, mut rx) = match datalink::channel(&interface, Default::default()) {
+    let (mut tx, _rx) = match datalink::channel(&interface, Default::default()) {
         Ok(Ethernet(_tx, _rx)) => (_tx, _rx),
         Ok(_) => panic!("Unhandled channel type"),
         Err(e) => panic!(
@@ -253,5 +244,5 @@ fn send_icmp_datalink(ether: EthTable, dst_ip: &str) {
             e
         ),
     };
-    tx.send_to(&final_packet, None);
+    let _ = tx.send_to(&final_packet, None);
 }

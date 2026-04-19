@@ -1,6 +1,6 @@
 [package]
 name = "rsubdomain"
-version = "1.2.6"
+version = "1.2.13"
 edition = "2021"
 authors = ["o0x1024 <o0x1024@gmail.com>"]
 description = "A high-performance subdomain brute-force tool written in Rust"
@@ -8,6 +8,7 @@ homepage = "https://github.com/o0x1024/rsubdomain"
 repository = "https://github.com/o0x1024/rsubdomain"
 license = "MIT"
 readme = "README.md"
+include = ["src/**", "data/**", "examples/*.rs", "README.md", "LICENSE", "Cargo.toml", "lib/Packet.lib"]
 keywords = ["subdomain", "dns", "security", "network", "brute-force"]
 categories = ["command-line-utilities", "network-programming"]
 
@@ -20,6 +21,47 @@ path = "src/lib.rs"
 [[bin]]
 name = "rsubdomain"
 path = "src/main.rs"
+required-features = ["cli", "full"]
+
+[[example]]
+name = "bandwidth_test"
+path = "examples/bandwidth_test.rs"
+required-features = ["full"]
+
+[[example]]
+name = "datalink"
+path = "examples/datalink.rs"
+required-features = ["full"]
+
+[[example]]
+name = "dictionary_array_test"
+path = "examples/dictionary_array_test.rs"
+required-features = ["full"]
+
+[[example]]
+name = "icmp"
+path = "examples/icmp.rs"
+required-features = ["full"]
+
+[[example]]
+name = "library_usage"
+path = "examples/library_usage.rs"
+required-features = ["full"]
+
+[[example]]
+name = "quick_start"
+path = "examples/quick_start.rs"
+required-features = ["full"]
+
+[[example]]
+name = "send_packet"
+path = "examples/send_packet.rs"
+required-features = ["full"]
+
+[[example]]
+name = "test_device"
+path = "examples/test_device.rs"
+required-features = ["full"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,17 +71,16 @@ log = "0.4"
 colored = "2.0"  
 byteorder = "1.4"  
 rand= "0.8.5"
-clap = { version = "4.5.13", features = ["derive"] }
+clap = { version = "4.5.13", features = ["derive"], optional = true }
 tokio = { version = "1.39.2", features = ["full"] }
-lazy_static = "1.4"
 chrono = { version = "0.4", features = ["serde"] }
 itertools = "0.13.0"
 crossbeam-channel = "0.5"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json"], optional = true }
 trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-regex = "1.0"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+regex = { version = "1.0", optional = true }
 
 [dev-dependencies]
 similar = "2.0"
@@ -48,12 +89,13 @@ tokio-test = "0.4"
 
 # 功能特性
 [features]
-default = ["full"]
+default = ["full", "cli"]
 full = ["verify", "dns-resolver", "speed-test", "output"]
-verify = []
+cli = ["dep:clap"]
+verify = ["dep:reqwest", "dep:regex"]
 dns-resolver = []
 speed-test = []
-output = []
+output = ["dep:serde", "dep:serde_json"]
 
 # 文档配置
 [package.metadata.docs.rs]

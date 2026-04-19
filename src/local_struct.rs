@@ -1,10 +1,8 @@
 use crate::model::StatusTable;
 use std::error::Error;
-use std::sync::RwLock;
 use std::time::SystemTime;
 
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct LocalNode {
     v: StatusTable,
     index: u32,
@@ -24,10 +22,7 @@ pub struct LocalStruct {
 impl LocalStruct {
     // Create a new LocalStruct
     pub fn new() -> Self {
-        LocalStruct {
-            items: Vec::new(),
-            
-        }
+        LocalStruct { items: Vec::new() }
     }
 
     // Return the number of items in the stack

@@ -7,7 +7,9 @@ use pnet::packet::{
     ip::IpNextHeaderProtocols,
     util, Packet,
 };
-use pnet::transport::{icmp_packet_iter,TransportChannelType::Layer4,transport_channel,TransportProtocol};
+use pnet::transport::{
+    icmp_packet_iter, transport_channel, TransportChannelType::Layer4, TransportProtocol,
+};
 
 use rand::random;
 use std::{
@@ -30,7 +32,7 @@ fn main() {
     let protocol = Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp));
     let (mut tx, mut rx) = match transport_channel(4096, protocol) {
         Ok((tx, rx)) => (tx, rx),
-        Err(e)  => panic!(
+        Err(e) => panic!(
             "An error occurred when creating the datalink channel: {}",
             e
         ),

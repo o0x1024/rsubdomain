@@ -1,15 +1,16 @@
-
-use std::collections::VecDeque;
+#[cfg(test)]
 use itertools::Itertools;
+#[cfg(test)]
+use std::collections::VecDeque;
 
-pub fn generate_subdomains(domains: &[&str],suffix:Vec<&str>) -> Vec<String> {
-
+#[cfg(test)]
+pub fn generate_subdomains(domains: &[&str], suffix: Vec<&str>) -> Vec<String> {
     // let domains_no_suffix = domains.iter().map(|x|x.replace("mgtv.com", "")).collect();
     let mut subdomains = Vec::new();
     for domain in domains {
         let mut domain_without_suffix = String::new();
-        for suf in suffix.clone(){
-            if domain.contains(suf){
+        for suf in suffix.clone() {
+            if domain.contains(suf) {
                 domain_without_suffix = domain.replace(suf, "");
             }
         }
@@ -24,17 +25,13 @@ pub fn generate_subdomains(domains: &[&str],suffix:Vec<&str>) -> Vec<String> {
     subdomains
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strsim::{levenshtein,jaro_winkler};
-
+    use strsim::jaro_winkler;
 
     #[test]
-    fn string_match(){
+    fn string_match() {
         let s1 = "static2-scloud-letv.yysh.mgtv.com";
         let s2 = "static2-abc-letv.yysh.mgtv.com";
         let distance = jaro_winkler(s1, s2);
@@ -55,11 +52,10 @@ mod tests {
             "mgemsg3.api.mgtv.com",
             "al2z.gateway.mgtv.com",
             "hisense-all-jhxkt.yysh.mgtv.com",
-            "all-jhxkt.hismarttv.com"
-    
+            "all-jhxkt.hismarttv.com",
         ];
-        let suffix = vec![".mgtv.com",".hismarttv.com"];
-        let subdomains = generate_subdomains(domains,suffix);
+        let suffix = vec![".mgtv.com", ".hismarttv.com"];
+        let subdomains = generate_subdomains(domains, suffix);
         println!("{:?}", subdomains);
     }
 }

@@ -1,120 +1,83 @@
-// use colored::*;
-// use log::{Level, LevelFilter, Metadata, Record};
-// use std::sync::Mutex;
-// use std::fmt;
+use log::{Level, LevelFilter, Metadata, Record, SetLoggerError};
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-// pub struct Logger {
-//     use_colors: bool,
-//     max_level: Level,
-//     labels: std::collections::HashMap<Level, &'static str>,
-//     mutex: Mutex<()>,
-// }
+static LOGGER: StdoutLogger = StdoutLogger::new();
+static LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
 
-// impl Logger {
-//     pub fn new() -> Self {
-//         let mut labels = std::collections::HashMap::new();
-//         labels.insert(Level::Error, "Error");
-//         labels.insert(Level::Warn, "Warning");
-//         labels.insert(Level::Info, "INFO");
-//         labels.insert(Level::Debug, "DEBUG");
-//         labels.insert(Level::Trace, "TRACE");
+pub fn init_logger(level: LevelFilter) -> Result<(), SetLoggerError> {
+    LOGGER.set_level(level);
 
-//         Logger {
-//             use_colors: true,
-//             max_level: Level::Info,
-//             labels,
-//             mutex: Mutex::new(()),
-//         }
-//     }
+    if LOGGER_INSTALLED
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        if let Err(error) = log::set_logger(&LOGGER) {
+            LOGGER_INSTALLED.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+        log::set_max_level(LevelFilter::Trace);
+    }
 
-//     fn wrap(&self, label: &str, level: Level) -> String {
-//         if !self.use_colors {
-//             return label.to_string();
-//         }
+    Ok(())
+}
 
-//         match level {
-//             Level::Error => label.red().to_string(),
-//             Level::Warn => label.yellow().to_string(),
-//             Level::Info => label.blue().to_string(),
-//             Level::Debug => label.magenta().to_string(),
-//             Level::Trace => label.normal().to_string(),
-//         }
-//     }
+struct StdoutLogger {
+    level: AtomicU8,
+}
 
-//     fn get_label(&self, level: Level, sb: &mut fmt::Formatter) -> fmt::Result {
-//         if level > self.max_level {
-//             return Ok(());
-//         }
+impl StdoutLogger {
+    const fn new() -> Self {
+        StdoutLogger {
+            level: AtomicU8::new(LevelFilter::Info as u8),
+        }
+    }
 
-//         if let Some(label) = self.labels.get(&level) {
-//             write!(sb, "[{}] ", self.wrap(label, level))
-//         } else {
-//             Ok(())
-//         }
-//     }
+    fn set_level(&self, level: LevelFilter) {
+        self.level.store(level as u8, Ordering::Relaxed);
+    }
 
-//     pub fn log(&self, level: Level, format: &str, args: fmt::Arguments) {
-//         if level > self.max_level {
-//             return;
-//         }
+    fn current_level(&self) -> LevelFilter {
+        match self.level.load(Ordering::Relaxed) {
+            0 => LevelFilter::Off,
+            1 => LevelFilter::Error,
+            2 => LevelFilter::Warn,
+            3 => LevelFilter::Info,
+            4 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        }
+    }
+}
 
-//         let _guard = self.mutex.lock().unwrap();
-//         let mut sb = String::new();
+impl log::Log for StdoutLogger {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.level() <= self.current_level()
+    }
 
-//         let _ = self.get_label(level, &mut sb);
-//         sb.push_str(&format!("{}", args));
+    fn log(&self, record: &Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
 
-//         println!("{}", sb);
-//     }
-// }
+        let prefix = match record.level() {
+            Level::Error => "[ERROR]",
+            Level::Warn => "[WARN]",
+            Level::Info => "[INFO]",
+            Level::Debug => "[DEBUG]",
+            Level::Trace => "[TRACE]",
+        };
 
-// impl log::Log for Logger {
-//     fn enabled(&self, metadata: &Metadata) -> bool {
-//         metadata.level() <= self.max_level
-//     }
+        match record.level() {
+            Level::Error | Level::Warn => {
+                let mut stderr = io::stderr().lock();
+                let _ = writeln!(stderr, "{} {}", prefix, record.args());
+            }
+            Level::Info | Level::Debug | Level::Trace => {
+                let mut stdout = io::stdout().lock();
+                let _ = writeln!(stdout, "{} {}", prefix, record.args());
+            }
+        }
+    }
 
-//     fn log(&self, record: &Record) {
-//         self.log(record.level(), record.args().as_str(), record.args())
-//     }
-
-//     fn flush(&self) {}
-// }
-
-// pub fn init_logger() {
-//     let logger = Logger::new();
-//     log::set_boxed_logger(Box::new(logger)).unwrap();
-//     log::set_max_level(LevelFilter::Trace);
-// }
-
-// pub fn infof(format: &str, args: fmt::Arguments) {
-//     log::info!("{}", format, args);
-// }
-
-// pub fn warningf(format: &str, args: fmt::Arguments) {
-//     log::warn!("{}", format, args);
-// }
-
-// pub fn errorf(format: &str, args: fmt::Arguments) {
-//     log::error!("{}", format, args);
-// }
-
-// pub fn debugf(format: &str, args: fmt::Arguments) {
-//     log::debug!("{}", format, args);
-// }
-
-// pub fn verbosef(format: &str, args: fmt::Arguments) {
-//     log::trace!("{}", format, args);
-// }
-
-// pub fn fatalf(format: &str, args: fmt::Arguments) {
-//     log::error!("{}", format, args);
-//     std::process::exit(1);
-// }
-
-// pub fn printf(format: &str, args: fmt::Arguments) {
-//     print!("{}", format, args);
-// }
-
-// pub fn labelf(format: &str, args: fmt::Arguments) {
-//     print!("{}", format, args);
-// }
+    fn flush(&self) {}
+}

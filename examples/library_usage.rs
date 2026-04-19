@@ -1,6 +1,6 @@
 use rsubdomain::{
+    brute_force_subdomains, export_subdomain_results, run_speed_test, OutputFormat, QueryType,
     SubdomainBruteConfig, SubdomainBruteEngine, SubdomainResult,
-    brute_force_subdomains, run_speed_test, OutputFormat, export_results
 };
 use std::error::Error;
 
@@ -23,37 +23,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
     speed_test_example().await?;
 
     println!("\n=== 所有示例执行完成 ===");
-    println!("程序执行完成，强制退出确保进程终止");
-    
-    // 经过测试确认，程序无法自然退出，需要强制退出
-    std::process::exit(0)
+    Ok(())
 }
 
 /// 示例1: 基本域名暴破
 async fn basic_brute_force() -> Result<(), Box<dyn Error>> {
     let domains = vec!["example.com".to_string()];
     let dictionary_file = None; // 使用内置字典
-    
+
     match brute_force_subdomains(
-        domains, 
-        dictionary_file, 
-        None, // resolvers
-        true, // skip_wildcard
-        None, // bandwidth_limit
+        domains,
+        dictionary_file,
+        None,  // resolvers
+        true,  // skip_wildcard
+        None,  // bandwidth_limit
         false, // verify_mode
         false, // resolve_records
-        true, // silent
-        None // device
-    ).await {
+        true,  // silent
+        None,  // device
+    )
+    .await
+    {
         Ok(results) => {
             println!("发现 {} 个子域名:", results.len());
-            for result in results.iter().take(10) { // 只显示前10个
-                println!("  {} -> {} ({})", result.domain, result.ip, result.record_type);
+            for result in results.iter().take(10) {
+                // 只显示前10个
+                println!(
+                    "  {} -> {} ({})",
+                    result.domain, result.ip, result.record_type
+                );
             }
         }
         Err(e) => println!("暴破失败: {}", e),
     }
-    
+
     Ok(())
 }
 
@@ -67,26 +70,34 @@ async fn advanced_brute_force() -> Result<(), Box<dyn Error>> {
         skip_wildcard: true,
         bandwidth_limit: Some("5M".to_string()),
         verify_mode: false,
+        max_retries: 5,
+        max_wait_seconds: 300,
+        verify_timeout_seconds: 10,
+        verify_concurrency: 50,
         resolve_records: false,
+        query_types: vec![QueryType::A],
         silent: false,
+        raw_records: false,
         device: None, // 自动检测网络设备
+        progress_callback: None,
     };
 
     match SubdomainBruteEngine::new(config).await {
-        Ok(engine) => {
-            match engine.run_brute_force().await {
-                Ok(results) => {
-                    println!("高级暴破发现 {} 个子域名:", results.len());
-                    for result in results.iter().take(5) {
-                        println!("  {} -> {} ({})", result.domain, result.ip, result.record_type);
-                    }
+        Ok(engine) => match engine.run_brute_force().await {
+            Ok(results) => {
+                println!("高级暴破发现 {} 个子域名:", results.len());
+                for result in results.iter().take(5) {
+                    println!(
+                        "  {} -> {} ({})",
+                        result.domain, result.ip, result.record_type
+                    );
                 }
-                Err(e) => println!("高级暴破失败: {}", e),
             }
-        }
+            Err(e) => println!("高级暴破失败: {}", e),
+        },
         Err(e) => println!("引擎创建失败: {}", e),
     }
-    
+
     Ok(())
 }
 
@@ -99,10 +110,17 @@ async fn full_featured_brute_force() -> Result<(), Box<dyn Error>> {
         skip_wildcard: true,
         dictionary: None,
         bandwidth_limit: Some("3M".to_string()),
-        verify_mode: true,      // 启用HTTP/HTTPS验证
-        resolve_records: true,  // 启用DNS记录解析
+        verify_mode: true, // 启用HTTP/HTTPS验证
+        max_retries: 5,
+        max_wait_seconds: 300,
+        verify_timeout_seconds: 10,
+        verify_concurrency: 50,
+        resolve_records: true, // 启用DNS记录解析
+        query_types: vec![QueryType::A],
         silent: false,
+        raw_records: false,
         device: Some("eth0".to_string()), // 指定网络设备
+        progress_callback: None,
     };
 
     match SubdomainBruteEngine::new(config).await {
@@ -110,23 +128,23 @@ async fn full_featured_brute_force() -> Result<(), Box<dyn Error>> {
             match engine.run_brute_force().await {
                 Ok(results) => {
                     println!("完整暴破发现 {} 个子域名:", results.len());
-                    
+
                     // 显示验证结果
                     for result in results.iter().take(3) {
                         println!("域名: {}", result.domain);
                         println!("  IP: {}", result.ip);
                         println!("  记录类型: {}", result.record_type);
-                        
+
                         if let Some(ref verified) = result.verified {
                             println!("  HTTP状态: {:?}", verified.http_status);
                             println!("  HTTPS状态: {:?}", verified.https_status);
                             println!("  标题: {:?}", verified.title);
                         }
-                        
+
                         if let Some(ref dns_records) = result.dns_records {
                             println!("  DNS记录: {:?}", dns_records.records.len());
                         }
-                        
+
                         println!();
                     }
 
@@ -138,7 +156,7 @@ async fn full_featured_brute_force() -> Result<(), Box<dyn Error>> {
         }
         Err(e) => println!("引擎创建失败: {}", e),
     }
-    
+
     Ok(())
 }
 
@@ -151,75 +169,30 @@ async fn speed_test_example() -> Result<(), Box<dyn Error>> {
 
 /// 导出结果示例
 async fn export_results_example(results: &[SubdomainResult]) -> Result<(), Box<dyn Error>> {
-    // 准备导出数据
-    let discovered_domains: Vec<rsubdomain::handle::DiscoveredDomain> = results.iter().map(|r| {
-        rsubdomain::handle::DiscoveredDomain {
-            domain: r.domain.clone(),
-            ip: r.ip.clone(),
-            record_type: r.record_type.clone(),
-            timestamp: chrono::Utc::now().timestamp() as u64,
-        }
-    }).collect();
-
-    let verification_results: Vec<rsubdomain::handle::VerificationResult> = results.iter()
-        .filter_map(|r| {
-            r.verified.as_ref().map(|v| rsubdomain::handle::VerificationResult {
-                domain: r.domain.clone(),
-                ip: r.ip.clone(),
-                http_status: v.http_status,
-                https_status: v.https_status,
-                title: v.title.clone(),
-                server: v.server_header.clone(),
-                is_alive: v.http_alive || v.https_alive,
-            })
-        })
-        .collect();
-
-    let summary = rsubdomain::handle::SummaryStats {
-        total_domains: results.len(),
-        unique_ips: results.iter().map(|r| r.ip.clone()).collect(),
-        ip_ranges: std::collections::HashMap::new(),
-        record_types: results.iter().fold(std::collections::HashMap::new(), |mut acc, r| {
-            *acc.entry(r.record_type.clone()).or_insert(0) += 1;
-            acc
-        }),
-        verified_domains: verification_results.len(),
-        alive_domains: verification_results.iter().filter(|v| v.is_alive).count(),
-    };
-
     // 导出为不同格式
-    export_results(
-        discovered_domains.clone(),
-        verification_results.clone(),
-        summary.clone(),
-        "results.json",
-        &OutputFormat::Json,
-    )?;
-
-    export_results(
-        discovered_domains.clone(),
-        verification_results.clone(),
-        summary.clone(),
-        "results.csv",
-        &OutputFormat::Csv,
-    )?;
+    export_subdomain_results(results, "results.json", &OutputFormat::Json)?;
+    export_subdomain_results(results, "results.csv", &OutputFormat::Csv)?;
 
     println!("结果已导出到 results.json 和 results.csv");
     Ok(())
 }
 
 /// 自定义结果处理示例
+#[allow(dead_code)]
 fn process_results_custom(results: &[SubdomainResult]) {
     println!("=== 自定义结果处理 ===");
-    
+
     // 按记录类型分组
-    let mut by_type: std::collections::HashMap<String, Vec<&SubdomainResult>> = 
+    let mut by_type: std::collections::HashMap<String, Vec<&SubdomainResult>> =
         std::collections::HashMap::new();
-    
+
     for result in results {
-        by_type.entry(result.record_type.clone()).or_default().push(result);
+        by_type
+            .entry(result.record_type.clone())
+            .or_default()
+            .push(result);
     }
-    
+
     for (record_type, domains) in by_type {
         println!("{} 记录 ({} 个):", record_type, domains.len());
         for domain in domains.iter().take(3) {
@@ -230,16 +203,22 @@ fn process_results_custom(results: &[SubdomainResult]) {
         }
         println!();
     }
-    
+
     // 统计存活的域名
-    let alive_count = results.iter()
-        .filter(|r| r.verified.as_ref().map_or(false, |v| v.http_alive || v.https_alive))
+    let alive_count = results
+        .iter()
+        .filter(|r| {
+            r.verified
+                .as_ref()
+                .map_or(false, |v| v.http_alive || v.https_alive)
+        })
         .count();
-    
+
     println!("存活域名: {} / {}", alive_count, results.len());
 }
 
 /// 错误处理示例
+#[allow(dead_code)]
 async fn error_handling_example() -> Result<(), Box<dyn Error>> {
     let config = SubdomainBruteConfig {
         domains: vec!["nonexistent-domain-12345.com".to_string()],
@@ -265,6 +244,6 @@ async fn error_handling_example() -> Result<(), Box<dyn Error>> {
             // 在实际应用中，这里可以使用默认配置或提示用户修正
         }
     }
-    
+
     Ok(())
 }

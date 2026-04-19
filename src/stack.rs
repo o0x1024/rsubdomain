@@ -1,4 +1,5 @@
-use std::sync::{Arc, Mutex, RwLock};
+use log::warn;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub struct Node<T> {
@@ -24,7 +25,10 @@ impl<T: Clone> Stack<T> {
         let new_node = Arc::new(Mutex::new(Node { data, next: None }));
 
         if let Some(head) = self.head.as_ref() {
-            new_node.lock().unwrap().next = Some(Arc::clone(head));
+            match new_node.lock() {
+                Ok(mut node) => node.next = Some(Arc::clone(head)),
+                Err(error) => warn!("Stack lock 被 poison: {}", error),
+            }
         }
 
         self.head = Some(Arc::clone(&new_node));
@@ -34,17 +38,29 @@ impl<T: Clone> Stack<T> {
     pub fn pop(&mut self) -> Option<T> {
         if let Some(head) = self.head.take() {
             self.length -= 1;
-            let data = head.lock().unwrap().data.clone();
-            self.head = head.lock().unwrap().next.take();
+            let data = match head.lock() {
+                Ok(node) => node.data.clone(),
+                Err(error) => {
+                    warn!("Stack lock 被 poison: {}", error);
+                    return None;
+                }
+            };
+            let next = match head.lock() {
+                Ok(mut node) => node.next.take(),
+                Err(error) => {
+                    warn!("Stack lock 被 poison: {}", error);
+                    None
+                }
+            };
+            self.head = next;
             Some(data)
         } else {
             None
         }
     }
-    
+
     #[allow(dead_code)]
     fn len(&self) -> usize {
         self.length
     }
 }
-

@@ -16,16 +16,6 @@ fn main() {
 
     let interfac = pnet::datalink::interfaces()[1].clone();
     println!("the interface name is {}", interfac.name);
-    let (mut tx, mut _rx) = match pnet::datalink::channel(&interfac, Default::default()) {
-        Ok(pnet::datalink::Channel::Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => panic!("Unhandled channel type"),
-        Err(e) => panic!(
-            "An error occurred when creating the datalink channel: {}",
-            e
-        ),
-    };
-
-    // custom code...
     let mut etherbuff = [0u8; 42];
     let mut arpbuff = [0u8; 28];
 
@@ -56,5 +46,5 @@ fn main() {
     my_ethernet_packet.set_ethertype(EtherTypes::Arp); // for ethernet
     my_ethernet_packet.set_payload(my_arp_packet.packet());
 
-    tx.send_to(&etherbuff, Some(interfac.clone()));
+    let _ = tx.send_to(&etherbuff, Some(interfac.clone()));
 }
