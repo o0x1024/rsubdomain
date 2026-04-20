@@ -78,24 +78,38 @@ pub struct Opts {
     #[arg(short, long)]
     pub list_network: bool,
 
-    /// resolvers path,use default dns on default
-    #[arg(short, long)]
+    /// DNS resolvers, repeat this flag to provide multiple IPs
+    #[arg(
+        short,
+        long,
+        help = "DNS resolvers, repeat this flag to provide multiple IPs"
+    )]
     pub resolvers: Vec<String>,
 
     /// load resolvers from file, one per line
     #[arg(long)]
     pub resolver_file: Option<String>,
 
-    /// slient
-    #[arg(short, long, visible_alias = "silent", default_value = "false")]
+    /// silent mode, only print discovered domains
+    #[arg(
+        short,
+        long = "silent",
+        visible_alias = "slient",
+        default_value = "false",
+        help = "Silent mode, only print discovered domains"
+    )]
     pub slient: bool,
 
     /// dic path
     #[arg(short, long)]
     pub file: Option<String>,
 
-    /// skip wildcard domains
-    #[arg(short = 'w', long, default_value = "true")]
+    /// skip wildcard detection and filtering
+    #[arg(
+        short = 'w',
+        long,
+        help = "Skip wildcard detection and filtering"
+    )]
     pub skip_wildcard: bool,
 
     /// network speed test
@@ -135,7 +149,12 @@ pub struct Opts {
     pub resolve_records: bool,
 
     /// query types to send (comma separated, e.g. a,aaaa,cname)
-    #[arg(long = "qtype", value_delimiter = ',', default_values_t = [QueryType::A])]
+    #[arg(
+        long = "qtype",
+        value_delimiter = ',',
+        default_value = "a",
+        help = "Query types to send (comma separated, e.g. a,aaaa,cname)"
+    )]
     pub query_types: Vec<QueryType>,
 
     /// manually specify network device
@@ -337,6 +356,10 @@ mod tests {
         dedupe_domains, normalize_domain, normalize_domain_entries, normalize_resolver,
         normalize_resolver_entries,
     };
+    #[cfg(feature = "cli")]
+    use super::Opts;
+    #[cfg(feature = "cli")]
+    use clap::Parser;
 
     #[test]
     fn normalize_domain_strips_noise_and_lowercases() {
@@ -403,5 +426,23 @@ mod tests {
         ]);
 
         assert_eq!(normalized, vec!["8.8.8.8", "1.1.1.1"]);
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn cli_skip_wildcard_defaults_to_false() {
+        let opts = Opts::parse_from(["rsubdomain", "-d", "example.com"]);
+
+        assert!(!opts.skip_wildcard);
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn cli_accepts_silent_and_legacy_slient_aliases() {
+        let silent = Opts::parse_from(["rsubdomain", "-d", "example.com", "--silent"]);
+        let legacy = Opts::parse_from(["rsubdomain", "-d", "example.com", "--slient"]);
+
+        assert!(silent.slient);
+        assert!(legacy.slient);
     }
 }

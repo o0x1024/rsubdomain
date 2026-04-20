@@ -163,6 +163,7 @@ mod model;
 mod output;
 mod query_type;
 mod recv;
+mod resolver_defaults;
 mod send;
 mod speed_test;
 mod stack;

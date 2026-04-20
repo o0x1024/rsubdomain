@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 use trust_dns_resolver::config::*;
 use trust_dns_resolver::TokioAsyncResolver;
 
+use crate::resolver_defaults::default_resolvers;
+
 /// 泛解析检测器
 pub struct WildcardDetector {
     resolver: TokioAsyncResolver,
@@ -111,14 +113,16 @@ impl WildcardDetector {
 fn build_resolver_config(
     resolvers: &[String],
 ) -> Result<ResolverConfig, Box<dyn std::error::Error>> {
-    let ips: Vec<IpAddr> = resolvers
+    let resolver_list = if resolvers.is_empty() {
+        default_resolvers()
+    } else {
+        resolvers.to_vec()
+    };
+
+    let ips: Vec<IpAddr> = resolver_list
         .iter()
         .map(|resolver| resolver.parse())
         .collect::<Result<Vec<IpAddr>, _>>()?;
-
-    if ips.is_empty() {
-        return Ok(ResolverConfig::default());
-    }
 
     Ok(ResolverConfig::from_parts(
         None,

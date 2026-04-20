@@ -1,4 +1,5 @@
 use crate::model::{EthTable, PacketTransport, StatusTable};
+use crate::resolver_defaults::default_resolvers;
 use crate::send::build_dns_query;
 use crate::send::SendDogError;
 use crate::state::BruteForceState;
@@ -40,18 +41,7 @@ impl SendDog {
             PacketTransport::Udp => build_udp_backend(&ether)?,
         });
 
-        let default_dns = if dns.is_empty() {
-            vec![
-                "223.5.5.5".to_string(),
-                "223.6.6.6".to_string(),
-                "180.76.76.76".to_string(),
-                "119.29.29.29".to_string(),
-                "182.254.116.116".to_string(),
-                "114.114.114.115".to_string(),
-            ]
-        } else {
-            dns
-        };
+        let default_dns = if dns.is_empty() { default_resolvers() } else { dns };
 
         Ok(SendDog {
             ether,

@@ -12,9 +12,9 @@ impl SubdomainBruteEngine {
     /// 创建新的暴破引擎
     pub async fn new(config: SubdomainBruteConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let wildcard_detector = if config.skip_wildcard {
-            Some(WildcardDetector::new_with_resolvers(&config.resolvers).await?)
-        } else {
             None
+        } else {
+            Some(WildcardDetector::new_with_resolvers(&config.resolvers).await?)
         };
 
         #[cfg(feature = "verify")]

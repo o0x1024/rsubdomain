@@ -76,7 +76,7 @@ impl Default for SubdomainBruteConfig {
             resolvers: Vec::new(),
             dictionary_file: None,
             dictionary: None,
-            skip_wildcard: true,
+            skip_wildcard: false,
             bandwidth_limit: Some("3M".to_string()),
             verify_mode: false,
             max_retries: 5,

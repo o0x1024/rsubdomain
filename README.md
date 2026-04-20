@@ -1,29 +1,30 @@
-## rsubdomain
-基于Rust实现的高性能子域名暴破工具，实现原理参考 [ksubdomain](https://github.com/knownsec/ksubdomain)
+# rsubdomain
+
+[中文](README.md) | [English](README_EN.md)
+
+基于 Rust 实现的高性能子域名暴破工具，实现原理参考 [ksubdomain](https://github.com/knownsec/ksubdomain)
 
 ## 为什么选择rsubdomain
-- 🚀 **高性能**: 基于原始套接字的异步DNS查询，支持高并发
+- 🚀 **高性能**: 直接构造 DNS 报文，结合链路层发包与 UDP 兼容模式，支持高并发
 - 🔍 **功能丰富**: 支持子域名发现、HTTP/HTTPS验证、DNS记录解析
 - 📊 **多格式输出**: 支持JSON、XML、CSV、TXT四种输出格式
 - 🌐 **智能网络**: 自动检测网络设备，支持手动指定网络接口
 - 📈 **网速测试**: 内置DNS包发送速度测试功能
-- 🎯 **泛解析检测**: 智能识别并处理泛解析域名
+- 🎯 **泛解析检测**: 支持泛解析检测与过滤，可按需跳过
 - 📋 **实时统计**: 提供详细的汇总统计信息
 
 ## 安装要求
-使用前需要安装libpcap或npcap：
+本项目不直接依赖 Linux/macOS 上的 `libpcap` 开发包，主要依赖 Rust 工具链和系统原生网络接口能力。
 
 ### Linux/macOS
-```bash
-# Ubuntu/Debian
-sudo apt-get install libpcap-dev
+- 安装可用的 Rust 工具链。
+- 确保当前环境允许访问链路层发包/收包接口。
 
-# CentOS/RHEL
-sudo yum install libpcap-devel
+macOS 额外说明：
 
-# macOS
-brew install libpcap
-```
+- 高性能发包/收包路径会访问系统的 BPF 设备。
+- 未配置 BPF 设备权限时，通常需要使用 `sudo` 运行。
+- 如果已安装 Wireshark 的 `ChmodBPF`/`chmodbpf` 组件，并且当前用户具备对应的 BPF 设备访问权限，则可以直接使用普通用户运行，无需 `root`。
 
 ### Windows
 需要安装以下组件：
@@ -44,6 +45,9 @@ cargo build --release
 ```bash
 # 基本子域名扫描
 ./rsubdomain -d example.com
+
+# 直接指定 DNS 解析器
+./rsubdomain -d example.com -r 8.8.8.8 -r 1.1.1.1
 
 # 使用自定义字典文件
 ./rsubdomain -d example.com -f wordlist.txt
@@ -68,6 +72,9 @@ cat domains.txt | ./rsubdomain --stdin
 
 # 指定多种查询类型
 ./rsubdomain -d example.com --qtype a,aaaa,cname
+
+# 跳过泛解析检测与过滤
+./rsubdomain -d example.com --skip-wildcard
 
 # 静默模式（只输出发现的域名）
 ./rsubdomain -d example.com --silent
@@ -146,11 +153,11 @@ cat domains.txt | ./rsubdomain --stdin
 | | `--exclude-domain` | 排除的目标域名，可逗号分隔 | - |
 | | `--exclude-domain-file` | 从文件读取排除域名，每行一个 | - |
 | `-l` | `--list-network` | 列出所有网络接口 | - |
-| `-r` | `--resolvers` | DNS解析器路径 | 系统默认DNS |
+| `-r` | `--resolvers` | 直接指定 DNS 解析器 IP，可重复传入 | 内置公共 DNS 列表 |
 | | `--resolver-file` | 从文件读取DNS解析器，每行一个 | - |
-| `-s` | `--slient` / `--silent` | 静默模式，只输出域名 | false |
+| `-s` | `--silent` | 静默模式，只输出域名（兼容历史拼写 `--slient`） | false |
 | `-f` | `--file` | 自定义字典文件路径 | 内置字典 |
-| `-w` | `--skip-wildcard` | 跳过泛解析域名检测 | true |
+| `-w` | `--skip-wildcard` | 跳过泛解析检测与过滤 | false |
 | `-n` | `--network-test` | 执行网速测试 | - |
 | | `--target-ip` | 网速测试目标IP | 8.8.8.8 |
 | `-b` | `--bandwidth` | 带宽限制 (K/M/G) | 3M |
@@ -218,15 +225,16 @@ IP段分布 (前10个):
 
 ## 技术实现
 
-- **原始套接字**: 直接构造和解析DNS包
-- **异步处理**: 基于Tokio的异步I/O
+- **报文构造**: 直接构造和解析 DNS 报文
+- **网络发送**: 优先使用链路层通道，在无可用 MAC 的接口上回退到 UDP 兼容模式
+- **异步编排**: 基于 Tokio 协调任务和结果处理
 - **智能解析**: 正确解析各种DNS记录类型
 - **网络检测**: 自动识别最佳网络接口
 - **数据导出**: 支持多种结构化数据格式
 
 ## 注意事项
 
-1. **权限要求**: 需要管理员/root权限运行（原始套接字）
+1. **权限要求**: 高性能模式会直接访问链路层发包/收包接口。Linux 通常仍需要 `root` 或等效能力；macOS 在未配置 BPF 设备权限时通常需要 `sudo`，安装 Wireshark 的 `ChmodBPF`/`chmodbpf` 并赋予当前用户访问权限后可直接以普通用户运行
 2. **防火墙**: 确保DNS流量（UDP 53端口）未被阻止
 3. **网络环境**: 建议在稳定的网络环境下使用
 4. **目标限制**: 请合理使用，避免对目标造成压力
@@ -293,7 +301,7 @@ rsubdomain = "1.2.13"
 tokio = { version = "1.0", features = ["full"] }
 ```
 
-如果你只想把它当作库引用，而不需要 CLI / HTTP 验证 / 导出能力，可以关闭默认特性：
+如果你只想把它当作库引用，而不需要 CLI / HTTP 验证 / DNS 记录解析 / 导出 / 网速测试能力，可以关闭默认特性：
 
 ```toml
 [dependencies]
@@ -497,10 +505,10 @@ cargo run --example library_usage
 
 ### 注意事项
 
-1. **权限要求**: 库使用原始套接字，需要管理员权限
+1. **权限要求**: 库的高性能路径会直接访问链路层接口。Linux 通常需要管理员权限或等效能力；macOS 在未配置 BPF 设备权限时通常需要 `sudo`，安装 Wireshark 的 `ChmodBPF`/`chmodbpf` 并赋予当前用户访问权限后可直接以普通用户运行
 2. **异步运行时**: 必须在tokio运行时中使用
 3. **网络依赖**: 需要稳定的网络连接
-4. **系统依赖**: 需要安装libpcap/npcap
+4. **系统依赖**: Windows 需要 Npcap/WinPcap 兼容环境；Linux/macOS 主要依赖系统原生网络接口权限配置
 5. **错误处理**: 建议使用`?`操作符或`match`进行错误处理
 
 ### 集成建议

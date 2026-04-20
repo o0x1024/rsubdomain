@@ -1,11 +1,12 @@
 #[cfg(feature = "speed-test")]
 use crate::speed_test::SpeedTester;
+use crate::resolver_defaults::default_resolvers;
 use crate::QueryType;
 
 use super::{SubdomainBruteConfig, SubdomainBruteEngine, SubdomainResult};
 
 fn with_default_resolvers(resolvers: Option<Vec<String>>) -> Vec<String> {
-    resolvers.unwrap_or_else(|| vec!["8.8.8.8".to_string()])
+    resolvers.unwrap_or_else(default_resolvers)
 }
 
 /// 便捷的域名暴破函数（使用字典文件）
