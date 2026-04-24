@@ -13,4 +13,4 @@ pub use convenience::{
 };
 pub use engine::SubdomainBruteEngine;
 pub use progress::{BruteForceProgress, BruteForceProgressPhase, ProgressCallback};
-pub use result::{SubdomainResult, SubdomainScanData};
+pub use result::{CdnAnalysisOptions, SubdomainResult, SubdomainScanData};

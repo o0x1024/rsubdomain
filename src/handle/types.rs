@@ -3,11 +3,41 @@ use std::fmt;
 
 use crate::QueryType;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CdnConfidence {
+    Low,
+    Medium,
+    High,
+}
+
+impl CdnConfidence {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CdnConfidence::Low => "low",
+            CdnConfidence::Medium => "medium",
+            CdnConfidence::High => "high",
+        }
+    }
+}
+
+impl fmt::Display for CdnConfidence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CdnEvidence {
+    pub source: String,
+    pub value: String,
+    pub detail: String,
+}
+
 /// 发现的域名结果
 #[derive(Debug, Clone)]
 pub struct DiscoveredDomain {
     pub domain: String,
-    pub ip: String,
+    pub value: String,
     pub query_type: QueryType,
     pub record_type: String,
     pub timestamp: u64,
@@ -25,6 +55,12 @@ pub struct AggregatedRecordValues {
 pub struct AggregatedDiscoveredDomain {
     pub domain: String,
     pub records: Vec<AggregatedRecordValues>,
+    pub has_cdn: bool,
+    pub possible_cdn: bool,
+    pub cdn_provider: Option<String>,
+    pub cdn_confidence: Option<CdnConfidence>,
+    pub cdn_evidence: Vec<CdnEvidence>,
+    pub cdn_signals: Vec<CdnEvidence>,
     pub raw_record_count: usize,
     pub first_seen: u64,
     pub last_seen: u64,
@@ -50,6 +86,10 @@ pub struct SummaryStats {
     pub unique_ips: HashSet<String>,
     pub ip_ranges: HashMap<String, Vec<String>>,
     pub record_types: HashMap<String, usize>,
+    pub cdn_domains: usize,
+    pub suspected_cdn_domains: usize,
+    pub cdn_providers: HashMap<String, usize>,
+    pub cdn_confidence: HashMap<String, usize>,
     pub verified_domains: usize,
     pub alive_domains: usize,
 }

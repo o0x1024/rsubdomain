@@ -1,93 +1,47 @@
-# rsubdomain v1.2.13 发布命令
+# rsubdomain v1.2.14 发布命令
 
-## 🚀 快速发布步骤
+## 快速步骤
 
 ### 1. 登录 crates.io
-
-如果还没有登录，需要先获取 API Token：
-
-1. 访问 https://crates.io/
-2. 使用 GitHub 账号登录
-3. 进入 Account Settings
-4. 生成新的 API Token
-5. 复制 Token 并执行：
 
 ```bash
 cargo login <YOUR_API_TOKEN>
 ```
 
-### 2. 最终检查
+### 2. 发布前检查
 
 ```bash
-# 清理构建缓存
-cargo clean
-
-# 编译检查
-cargo check
-
-# 运行测试
+cargo build
 cargo test
-
-# 检查包内容
 cargo package --list --allow-dirty
-
-# 创建发布包
 cargo package --allow-dirty
 ```
 
-### 3. 发布到 crates.io
-
-由于使用了代理注册表，需要指定官方注册表：
+### 3. 发布
 
 ```bash
-# 发布命令（指定官方注册表）
 cargo publish --allow-dirty --registry crates-io
 ```
 
-### 4. 验证发布
-
-发布成功后：
+### 4. 发布后检查
 
 1. 访问 https://crates.io/crates/rsubdomain
-2. 检查版本 1.2.13 是否显示
-3. 测试安装：`cargo install rsubdomain`
+2. 确认显示版本 `1.2.14`
+3. 验证安装：`cargo install rsubdomain`
 
-## 📋 当前状态
+## 当前发布内容
 
-- ✅ 版本号已更新为 1.2.13
-- ✅ 代码编译通过（有警告但无错误）
-- ✅ 所有测试通过（4个单元测试 + 2个文档测试）
-- ✅ 发布包创建成功
-- ✅ **已成功发布到 crates.io** ✨
-- ✅ 发布文档已更新
+- 版本号：`1.2.14`
+- 默认 CLI 等待时间改为 `10` 秒
+- 新增 `--dns-timeout` 和 `--transport`
+- 默认仍走 `Ethernet`，`UDP` 仅作为显式可选参数
+- 修复大字典扫描收尾阶段的栈溢出
+- 重构超时管理为到期队列
+- 引入解析器健康评分和动态 DNS 超时
+- 优化 `raw-records` 输出和 Ethernet 接收路径
 
-## 🔧 本次更新内容（v1.2.13）
+## 注意事项
 
-- **新增**: 支持传入字典数组 (`dictionary` 参数)
-- **修复**: 任务完成后程序无法正常退出的问题
-- **改进**: 增强了 API 的灵活性和稳定性
-- **优化**: 资源清理机制，避免进程挂起
-- **重要修复**: 移除所有 unwrap/expect/panic，实现完整的错误处理
-  - 网络接口异常会优雅降级而不是 panic
-  - IPv6 环境会跳过而不是 crash
-  - Mutex 被 poison 会记录错误并继续运行
-
-## ⚠️ 注意事项
-
-1. **注册表问题**: 由于使用了代理注册表，必须添加 `--registry crates-io` 参数
-2. **Git 状态**: 使用 `--allow-dirty` 因为有未提交的更改
-3. **版本唯一性**: 每个版本号只能发布一次，如果失败需要递增版本号
-
-## 🚨 如果发布失败
-
-常见问题和解决方案：
-
-1. **版本已存在**: 递增版本号（当前为 1.2.13，下次使用 1.2.14）
-2. **权限问题**: 检查 API Token 是否正确
-3. **网络问题**: 检查网络连接和代理设置
-4. **依赖问题**: 确保所有依赖都是稳定版本
-
----
-
-**最后发布**: v1.2.13 待发布
-访问: https://crates.io/crates/rsubdomain
+1. 每个版本号只能发布一次。
+2. 当前仓库是 dirty 状态，因此命令里保留 `--allow-dirty`。
+3. 当前环境若无法解析 `index.crates.io`，需要在可联网环境下执行发布命令。

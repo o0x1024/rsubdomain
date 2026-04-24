@@ -1,0 +1,20 @@
+# provider,pattern1,pattern2,...
+Akamai,suffix:akamaiedge.net,suffix:edgesuite.net,suffix:edgekey.net,contains:.akamai.
+Alibaba Cloud CDN,suffix:alicdn.com
+Amazon CloudFront,suffix:cloudfront.net
+Azure Front Door,suffix:azurefd.net
+Baidu Cloud CDN,suffix:bdydns.com,suffix:bsgslb.cn
+BunnyCDN,suffix:b-cdn.net
+CDNetworks,suffix:cdngc.net,suffix:cdngslb.com
+ChinaCache,suffix:kunluncan.com,suffix:chinacache.net,suffix:ccgslb.net
+Cloudflare,suffix:cloudflare.net
+Edgecast,suffix:edgecastcdn.net,suffix:systemcdn.net,suffix:transactcdn.net
+Fastly,suffix:fastly.net,suffix:fastlylb.net
+Gcore,suffix:gcorelabs.net
+Huawei Cloud CDN,suffix:huaweicloudedge.com
+Imperva,suffix:incapdns.net
+KeyCDN,suffix:kxcdn.com
+StackPath,suffix:stackpathcdn.com,suffix:stackpathdns.com
+Tencent Cloud CDN,suffix:dnsv1.com,suffix:tcdn.qq.com
+Volcengine CDN,suffix:volcgslb.com
+Wangsu,suffix:wscdns.com,suffix:wswebcdn.com,suffix:ourwebcdn.com

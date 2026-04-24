@@ -1,3 +1,4 @@
+mod arp;
 mod listing;
 mod probing;
 mod selection;
@@ -51,4 +52,13 @@ pub(super) fn parse_mac_addr(value: &str) -> Option<pnet::util::MacAddr> {
     Some(pnet::util::MacAddr::new(
         octets[0], octets[1], octets[2], octets[3], octets[4], octets[5],
     ))
+}
+
+pub(super) fn is_valid_next_hop_mac(mac: pnet::util::MacAddr) -> bool {
+    let octets = [mac.0, mac.1, mac.2, mac.3, mac.4, mac.5];
+    let is_zero = octets.iter().all(|octet| *octet == 0);
+    let is_broadcast = octets.iter().all(|octet| *octet == u8::MAX);
+    let is_multicast = (octets[0] & 0x01) == 0x01;
+
+    !is_zero && !is_broadcast && !is_multicast
 }

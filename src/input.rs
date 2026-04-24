@@ -1,4 +1,4 @@
-use crate::QueryType;
+use crate::{PacketTransport, QueryType};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, Read};
@@ -105,11 +105,7 @@ pub struct Opts {
     pub file: Option<String>,
 
     /// skip wildcard detection and filtering
-    #[arg(
-        short = 'w',
-        long,
-        help = "Skip wildcard detection and filtering"
-    )]
+    #[arg(short = 'w', long, help = "Skip wildcard detection and filtering")]
     pub skip_wildcard: bool,
 
     /// network speed test
@@ -120,8 +116,8 @@ pub struct Opts {
     #[arg(long, default_value = "8.8.8.8")]
     pub target_ip: String,
 
-    /// bandwidth limit (e.g., 3M, 5K, 10G)
-    #[arg(short, long, default_value = "3M")]
+    /// bandwidth limit (e.g., 256K, 1M, 10G)
+    #[arg(short, long, default_value = "256K")]
     pub bandwidth: String,
 
     /// verify mode - check HTTP/HTTPS after domain discovery
@@ -132,8 +128,12 @@ pub struct Opts {
     #[arg(long, default_value_t = 5, value_parser = value_parser!(u8).range(1..))]
     pub retry: u8,
 
+    /// DNS response timeout in seconds before retry
+    #[arg(long = "dns-timeout", default_value_t = 10, value_parser = value_parser!(u64).range(1..))]
+    pub dns_timeout: u64,
+
     /// max wait time in seconds after sending queries
-    #[arg(long = "wait-seconds", default_value_t = 300, value_parser = value_parser!(u64).range(1..))]
+    #[arg(long = "wait-seconds", default_value_t = 10, value_parser = value_parser!(u64).range(1..))]
     pub wait_seconds: u64,
 
     /// HTTP/HTTPS verification timeout in seconds
@@ -148,6 +148,22 @@ pub struct Opts {
     #[arg(long)]
     pub resolve_records: bool,
 
+    /// enable CDN detection in aggregated asset view
+    #[arg(long, default_value_t = false, conflicts_with = "no_cdn_detect")]
+    pub cdn_detect: bool,
+
+    /// disable CDN detection in aggregated asset view
+    #[arg(long, default_value_t = false, conflicts_with = "cdn_detect")]
+    pub no_cdn_detect: bool,
+
+    /// collapse CDN-backed A/AAAA records into a single representative value
+    #[arg(long, default_value_t = false, conflicts_with = "no_cdn_collapse")]
+    pub cdn_collapse: bool,
+
+    /// keep all CDN-backed A/AAAA records in aggregated view
+    #[arg(long, default_value_t = false, conflicts_with = "cdn_collapse")]
+    pub no_cdn_collapse: bool,
+
     /// query types to send (comma separated, e.g. a,aaaa,cname)
     #[arg(
         long = "qtype",
@@ -160,6 +176,10 @@ pub struct Opts {
     /// manually specify network device
     #[arg(short = 'e', long)]
     pub device: Option<String>,
+
+    /// network transport mode
+    #[arg(long, value_enum, default_value_t = PacketTransport::Ethernet)]
+    pub transport: PacketTransport,
 
     /// output file path
     #[arg(short, long)]
@@ -352,12 +372,12 @@ fn dedupe_domains(domains: Vec<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "cli")]
+    use super::Opts;
     use super::{
         dedupe_domains, normalize_domain, normalize_domain_entries, normalize_resolver,
         normalize_resolver_entries,
     };
-    #[cfg(feature = "cli")]
-    use super::Opts;
     #[cfg(feature = "cli")]
     use clap::Parser;
 
@@ -444,5 +464,32 @@ mod tests {
 
         assert!(silent.slient);
         assert!(legacy.slient);
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn cli_accepts_cdn_toggle_flags() {
+        let disable = Opts::parse_from(["rsubdomain", "-d", "example.com", "--no-cdn-detect"]);
+        let enable = Opts::parse_from(["rsubdomain", "-d", "example.com", "--cdn-collapse"]);
+
+        assert!(disable.no_cdn_detect);
+        assert!(enable.cdn_collapse);
+    }
+
+    #[cfg(feature = "cli")]
+    #[test]
+    fn cli_transport_defaults_to_ethernet_and_accepts_udp() {
+        let default_opts = Opts::parse_from(["rsubdomain", "-d", "example.com"]);
+        let udp_opts = Opts::parse_from([
+            "rsubdomain",
+            "-d",
+            "example.com",
+            "--transport",
+            "udp",
+        ]);
+
+        assert_eq!(default_opts.transport, crate::PacketTransport::Ethernet);
+        assert_eq!(udp_opts.transport, crate::PacketTransport::Udp);
+        assert_eq!(default_opts.dns_timeout, 10);
     }
 }

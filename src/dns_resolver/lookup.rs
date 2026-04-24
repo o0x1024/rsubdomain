@@ -1,7 +1,7 @@
 use log::warn;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::proto::rr::{RData, RecordType};
@@ -20,12 +20,15 @@ impl DnsResolver {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let resolver =
             TokioAsyncResolver::tokio(build_resolver_config(resolvers)?, ResolverOpts::default());
-        Ok(DnsResolver { resolver })
+        Ok(DnsResolver {
+            resolver,
+            ptr_cache: Arc::new(Mutex::new(HashMap::new())),
+        })
     }
 
     /// 解析域名的所有记录类型
     pub async fn resolve_all_records(&self, domain: &str) -> DnsResolveResult {
-        resolve_all_records_with(&self.resolver, domain).await
+        resolve_all_records_with(&self.resolver, &self.ptr_cache, domain).await
     }
 
     /// 批量解析域名
@@ -36,10 +39,11 @@ impl DnsResolver {
         for domain in domains {
             let permit = Arc::clone(&semaphore);
             let resolver = self.resolver.clone();
+            let ptr_cache = Arc::clone(&self.ptr_cache);
 
             let task = tokio::spawn(async move {
                 match permit.acquire().await {
-                    Ok(_permit) => resolve_all_records_with(&resolver, &domain).await,
+                    Ok(_permit) => resolve_all_records_with(&resolver, &ptr_cache, &domain).await,
                     Err(error) => {
                         warn!("获取 DNS 解析信号量失败: {}", error);
                         empty_result(domain)
@@ -60,23 +64,33 @@ impl DnsResolver {
 
     /// 简单的A记录解析
     pub async fn resolve_a_record(&self, domain: &str) -> Option<String> {
-        if let Ok(response) = self.resolver.lookup_ip(domain).await {
-            for ip in response.iter() {
-                if let IpAddr::V4(ipv4) = ip {
-                    return Some(ipv4.to_string());
-                }
+        let records = lookup_record_set(
+            &self.resolver,
+            domain,
+            RecordType::A,
+            |record| match record {
+                RData::A(ipv4) => Some(DnsRecord::A(ipv4.to_string())),
+                _ => None,
+            },
+        )
+        .await;
+
+        for record in records {
+            if let DnsRecord::A(ipv4) = record {
+                return Some(ipv4);
             }
         }
         None
     }
 }
 
-async fn resolve_all_records_with(resolver: &TokioAsyncResolver, domain: &str) -> DnsResolveResult {
+async fn resolve_all_records_with(
+    resolver: &TokioAsyncResolver,
+    ptr_cache: &Arc<Mutex<HashMap<IpAddr, Vec<String>>>>,
+    domain: &str,
+) -> DnsResolveResult {
     let mut records = HashMap::new();
     let mut has_records = false;
-
-    let aaaa_records = lookup_a_and_aaaa(resolver, domain, &mut has_records).await;
-    insert_records(&mut records, "A/AAAA", aaaa_records);
 
     let cname_records =
         lookup_record_set(resolver, domain, RecordType::CNAME, |record| match record {
@@ -86,6 +100,35 @@ async fn resolve_all_records_with(resolver: &TokioAsyncResolver, domain: &str) -
         .await;
     has_records |= !cname_records.is_empty();
     insert_records(&mut records, "CNAME", cname_records);
+    if has_records {
+        return DnsResolveResult {
+            domain: domain.to_string(),
+            records,
+            has_records,
+        };
+    }
+
+    let a_records = lookup_record_set(resolver, domain, RecordType::A, |record| match record {
+        RData::A(ipv4) => Some(DnsRecord::A(ipv4.to_string())),
+        _ => None,
+    })
+    .await;
+    has_records |= !a_records.is_empty();
+    insert_records(&mut records, "A", a_records);
+
+    let aaaa_records =
+        lookup_record_set(resolver, domain, RecordType::AAAA, |record| match record {
+            RData::AAAA(ipv6) => Some(DnsRecord::AAAA(ipv6.to_string())),
+            _ => None,
+        })
+        .await;
+    has_records |= !aaaa_records.is_empty();
+    insert_records(&mut records, "AAAA", aaaa_records);
+
+    let ptr_records =
+        lookup_ptr_records(resolver, ptr_cache, records.get("A"), records.get("AAAA")).await;
+    has_records |= !ptr_records.is_empty();
+    insert_records(&mut records, "PTR", ptr_records);
 
     let ns_records = lookup_record_set(resolver, domain, RecordType::NS, |record| match record {
         RData::NS(ns) => Some(DnsRecord::NS(ns.to_string())),
@@ -131,29 +174,6 @@ async fn resolve_all_records_with(resolver: &TokioAsyncResolver, domain: &str) -
     }
 }
 
-async fn lookup_a_and_aaaa(
-    resolver: &TokioAsyncResolver,
-    domain: &str,
-    has_records: &mut bool,
-) -> Vec<DnsRecord> {
-    let mut records = Vec::new();
-    if let Ok(response) = resolver.lookup_ip(domain).await {
-        for ip in response.iter() {
-            match ip {
-                IpAddr::V4(ipv4) => {
-                    records.push(DnsRecord::A(ipv4.to_string()));
-                    *has_records = true;
-                }
-                IpAddr::V6(ipv6) => {
-                    records.push(DnsRecord::AAAA(ipv6.to_string()));
-                    *has_records = true;
-                }
-            }
-        }
-    }
-    records
-}
-
 async fn lookup_record_set<F>(
     resolver: &TokioAsyncResolver,
     domain: &str,
@@ -174,6 +194,66 @@ where
     records
 }
 
+async fn lookup_ptr_records(
+    resolver: &TokioAsyncResolver,
+    ptr_cache: &Arc<Mutex<HashMap<IpAddr, Vec<String>>>>,
+    a_records: Option<&Vec<DnsRecord>>,
+    aaaa_records: Option<&Vec<DnsRecord>>,
+) -> Vec<DnsRecord> {
+    let mut ptr_records = Vec::new();
+    let mut ip_candidates = Vec::new();
+
+    if let Some(records) = a_records {
+        for record in records {
+            if let DnsRecord::A(ip) = record {
+                ip_candidates.push(ip.clone());
+            }
+        }
+    }
+
+    if let Some(records) = aaaa_records {
+        for record in records {
+            if let DnsRecord::AAAA(ip) = record {
+                ip_candidates.push(ip.clone());
+            }
+        }
+    }
+
+    ip_candidates.sort();
+    ip_candidates.dedup();
+
+    for ip_candidate in ip_candidates {
+        let ip = match ip_candidate.parse::<IpAddr>() {
+            Ok(ip) => ip,
+            Err(_) => continue,
+        };
+
+        if let Ok(cache) = ptr_cache.lock() {
+            if let Some(cached) = cache.get(&ip) {
+                for value in cached {
+                    ptr_records.push(DnsRecord::PTR(value.clone()));
+                }
+                continue;
+            }
+        }
+
+        let mut resolved_values = Vec::new();
+        if let Ok(response) = resolver.reverse_lookup(ip).await {
+            for ptr in response.iter() {
+                let value = ptr.to_string();
+                ptr_records.push(DnsRecord::PTR(value.clone()));
+                resolved_values.push(value);
+            }
+        }
+
+        if let Ok(mut cache) = ptr_cache.lock() {
+            cache.insert(ip, resolved_values);
+        }
+    }
+
+    ptr_records
+}
+
 fn insert_records(
     records: &mut HashMap<String, Vec<DnsRecord>>,
     key: &str,
@@ -189,5 +269,84 @@ fn empty_result(domain: String) -> DnsResolveResult {
         domain,
         records: HashMap::new(),
         has_records: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::dns_resolver::{DnsRecord, DnsResolveResult};
+
+    fn build_direct_record_result(
+        domain: &str,
+        cname_records: Vec<DnsRecord>,
+        a_records: Vec<DnsRecord>,
+        aaaa_records: Vec<DnsRecord>,
+        txt_records: Vec<DnsRecord>,
+    ) -> DnsResolveResult {
+        let mut records = HashMap::new();
+        let mut has_records = false;
+
+        has_records |= !cname_records.is_empty();
+        super::insert_records(&mut records, "CNAME", cname_records);
+        if has_records {
+            return DnsResolveResult {
+                domain: domain.to_string(),
+                records,
+                has_records,
+            };
+        }
+
+        has_records |= !a_records.is_empty();
+        super::insert_records(&mut records, "A", a_records);
+
+        has_records |= !aaaa_records.is_empty();
+        super::insert_records(&mut records, "AAAA", aaaa_records);
+
+        has_records |= !txt_records.is_empty();
+        super::insert_records(&mut records, "TXT", txt_records);
+
+        DnsResolveResult {
+            domain: domain.to_string(),
+            records,
+            has_records,
+        }
+    }
+
+    #[test]
+    fn cname_result_stops_direct_record_expansion() {
+        let result = build_direct_record_result(
+            "m.mgtv.com",
+            vec![DnsRecord::CNAME("m.mgtv.com.cdn.dnsv1.com".to_string())],
+            vec![DnsRecord::A("58.49.196.112".to_string())],
+            Vec::new(),
+            vec![DnsRecord::TXT("ignored".to_string())],
+        );
+
+        assert!(result.has_records);
+        assert_eq!(result.records.len(), 1);
+        assert!(result.records.contains_key("CNAME"));
+        assert!(!result.records.contains_key("A"));
+        assert!(!result.records.contains_key("TXT"));
+    }
+
+    #[test]
+    fn non_cname_result_preserves_multi_value_records() {
+        let result = build_direct_record_result(
+            "app.mgtv.com",
+            Vec::new(),
+            vec![
+                DnsRecord::A("119.96.61.143".to_string()),
+                DnsRecord::A("119.96.61.144".to_string()),
+            ],
+            vec![DnsRecord::AAAA("2400::1".to_string())],
+            vec![DnsRecord::TXT("v=spf1".to_string())],
+        );
+
+        assert!(result.has_records);
+        assert_eq!(result.records["A"].len(), 2);
+        assert_eq!(result.records["AAAA"].len(), 1);
+        assert_eq!(result.records["TXT"].len(), 1);
     }
 }

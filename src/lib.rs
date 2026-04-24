@@ -37,7 +37,7 @@
 //!     
 //!     println!("发现 {} 个子域名", results.len());
 //!     for result in results.iter().take(3) {
-//!         println!("  {} -> {} ({})", result.domain, result.ip, result.record_type);
+//!         println!("  {} -> {} ({})", result.domain, result.value, result.record_type);
 //!     }
 //!     
 //!     Ok(())
@@ -55,6 +55,8 @@
 //!         domains: vec!["example.com".to_string()],
 //!         verify_mode: true,      // 启用HTTP/HTTPS验证
 //!         resolve_records: true,  // 启用DNS记录解析
+//!         cdn_detect: true,       // 启用CDN识别
+//!         cdn_collapse: true,     // 在聚合视图中收敛CDN多IP
 //!         bandwidth_limit: Some("5M".to_string()), // 带宽限制
 //!         silent: false,
 //!         ..Default::default()
@@ -65,7 +67,7 @@
 //!     
 //!     println!("发现 {} 个子域名", results.len());
 //!     for result in results.iter().take(3) {
-//!         println!("  {} -> {} ({})", result.domain, result.ip, result.record_type);
+//!         println!("  {} -> {} ({})", result.domain, result.value, result.record_type);
 //!         if let Some(verified) = &result.verified {
 //!             println!("    HTTP: {}, HTTPS: {}, HTTP存活: {}, HTTPS存活: {}",
 //!                 verified.http_status.unwrap_or(0),
@@ -150,6 +152,7 @@
 
 // 内部模块
 mod api;
+mod asset;
 pub mod device;
 #[cfg(feature = "dns-resolver")]
 pub mod dns_resolver;
@@ -163,6 +166,7 @@ mod model;
 mod output;
 mod query_type;
 mod recv;
+mod resolver_health;
 mod resolver_defaults;
 mod send;
 mod speed_test;
@@ -180,17 +184,18 @@ mod wildcard;
 pub use api::run_speed_test;
 pub use api::{
     brute_force_subdomains, brute_force_subdomains_with_config, brute_force_subdomains_with_dict,
-    BruteForceProgress, BruteForceProgressPhase, ProgressCallback, SubdomainBruteConfig,
-    SubdomainBruteEngine, SubdomainResult, SubdomainScanData,
+    BruteForceProgress, BruteForceProgressPhase, CdnAnalysisOptions, ProgressCallback,
+    SubdomainBruteConfig, SubdomainBruteEngine, SubdomainResult, SubdomainScanData,
 };
 
 // 导出其他有用的类型
 #[cfg(feature = "dns-resolver")]
 pub use dns_resolver::{DnsRecord, DnsResolveResult, DnsResolver};
 pub use handle::{
-    generate_summary_from_data, print_aggregated_domains, print_summary_stats,
-    print_verification_result, AggregatedDiscoveredDomain, AggregatedRecordValues,
-    DiscoveredDomain, SummaryStats, VerificationResult,
+    flush_raw_record_output, generate_summary_from_data, print_aggregated_domains,
+    print_summary_stats, print_verification_result, AggregatedDiscoveredDomain,
+    AggregatedRecordValues, CdnConfidence, CdnEvidence, DiscoveredDomain, SummaryStats,
+    VerificationResult,
 };
 #[cfg(feature = "cli")]
 pub use input::Opts;
@@ -198,7 +203,10 @@ pub use input::{parse_bandwidth, OutputFormat};
 #[cfg(feature = "cli")]
 pub use input::{resolve_resolver_input, resolve_target_domain_input, resolve_target_domains};
 #[cfg(feature = "output")]
-pub use output::{export_results, export_scan_data, export_subdomain_results};
+pub use output::{
+    export_results, export_scan_data, export_subdomain_results,
+    export_subdomain_results_with_options,
+};
 pub use query_type::QueryType;
 pub use speed_test::BandwidthLimiter;
 #[cfg(feature = "speed-test")]
@@ -209,7 +217,7 @@ pub use wildcard::WildcardDetector;
 
 // 设备相关
 pub use device::{list_network_devices, print_network_devices, NetworkDevice};
-pub use model::EthTable;
+pub use model::{EthTable, PacketTransport};
 
 // 状态管理
 pub use state::BruteForceState;

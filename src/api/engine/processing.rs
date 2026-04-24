@@ -89,8 +89,18 @@ impl SubdomainBruteEngine {
         for sub in sub_domain_list {
             for domain in &self.config.domains {
                 for query_type in &query_types {
+                    let final_domain = format!("{}.{}", sub, domain);
+
                     if let Some(limiter) = bandwidth_limiter {
-                        limiter.can_send(64).await;
+                        let packet_size = match senddog.lock() {
+                            Ok(guard) => guard.estimate_packet_size(&final_domain) as u64,
+                            Err(error) => {
+                                warn!("无法锁定 senddog: {}", error);
+                                continue;
+                            }
+                        };
+
+                        limiter.acquire(packet_size).await;
                     }
 
                     let mut senddog = match senddog.lock() {
@@ -101,14 +111,20 @@ impl SubdomainBruteEngine {
                         }
                     };
 
-                    let final_domain = format!("{}.{}", sub, domain);
-                    let dns_name = senddog.chose_dns();
+                    let dns_name = self
+                        .state
+                        .choose_resolver(senddog.resolvers(), &final_domain)
+                        .unwrap_or_else(|| senddog.resolvers()[0].clone());
+                    let timeout_seconds = self
+                        .state
+                        .current_dns_timeout_seconds(self.config.dns_timeout_seconds);
                     let (flagid2, scr_port) = senddog.build_status_table(
                         &self.state,
                         final_domain.as_str(),
                         dns_name.as_str(),
                         *query_type,
                         1,
+                        timeout_seconds,
                     );
                     senddog.send(final_domain, dns_name, *query_type, scr_port, flagid2)?;
                     count += 1;

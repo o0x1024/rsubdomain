@@ -1,11 +1,15 @@
 use clap::Parser;
 use log::info;
 use log::LevelFilter;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use rsubdomain::{
-    device, export_scan_data, logger, print_aggregated_domains, print_summary_stats,
-    print_verification_result, resolve_resolver_input, resolve_target_domain_input, Opts,
-    OutputFormat, SpeedTester, SubdomainBruteConfig, SubdomainBruteEngine, SubdomainScanData,
+    device, export_scan_data, flush_raw_record_output, logger, print_aggregated_domains, print_summary_stats,
+    print_verification_result, resolve_resolver_input, resolve_target_domain_input,
+    BruteForceProgress, BruteForceProgressPhase, ProgressCallback,
+    CdnAnalysisOptions, Opts, OutputFormat, SpeedTester, SubdomainBruteConfig,
+    SubdomainBruteEngine, SubdomainScanData,
 };
 
 #[tokio::main]
@@ -45,6 +49,7 @@ async fn run_network_speed_test(target_ip: &str) -> Result<(), Box<dyn std::erro
 async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error>> {
     let domain_input = resolve_target_domain_input(&opts)?;
     let resolver_input = resolve_resolver_input(&opts)?;
+    let progress_callback = build_progress_callback(!opts.slient);
 
     if !opts.slient {
         info!(
@@ -63,8 +68,16 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
             }
         );
         info!(
-            "运行控制: retry={}, wait={}s, verify-timeout={}s, verify-concurrency={}",
-            opts.retry, opts.wait_seconds, opts.verify_timeout, opts.verify_concurrency
+            "运行控制: retry={}, dns-timeout={}s, wait={}s, verify-timeout={}s, verify-concurrency={}, bandwidth={}, transport={:?}, cdn-detect={}, cdn-collapse={}",
+            opts.retry,
+            opts.dns_timeout,
+            opts.wait_seconds,
+            opts.verify_timeout,
+            opts.verify_concurrency,
+            opts.bandwidth,
+            opts.transport,
+            resolve_cdn_detect(&opts),
+            resolve_cdn_collapse(&opts)
         );
     }
 
@@ -77,20 +90,31 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
         bandwidth_limit: Some(opts.bandwidth.clone()),
         verify_mode: opts.verify,
         max_retries: opts.retry,
+        dns_timeout_seconds: opts.dns_timeout,
         max_wait_seconds: opts.wait_seconds,
         verify_timeout_seconds: opts.verify_timeout,
         verify_concurrency: opts.verify_concurrency,
         resolve_records: opts.resolve_records,
+        cdn_detect: resolve_cdn_detect(&opts),
+        cdn_collapse: resolve_cdn_collapse(&opts),
         query_types: opts.query_types.clone(),
         silent: opts.slient,
         raw_records: opts.raw_records,
         device: opts.device.clone(),
-        progress_callback: None,
+        transport: opts.transport,
+        progress_callback,
     })
     .await?;
 
     let results = engine.run_brute_force().await?;
-    let scan_data = SubdomainScanData::from_results(&results);
+    flush_raw_record_output();
+    let scan_data = SubdomainScanData::from_results_with_options(
+        &results,
+        CdnAnalysisOptions {
+            detect: resolve_cdn_detect(&opts),
+            collapse: resolve_cdn_collapse(&opts),
+        },
+    );
 
     if !opts.slient && !opts.raw_records {
         print_aggregated_domains(&scan_data.aggregated_domains);
@@ -116,4 +140,108 @@ async fn run_subdomain_brute(opts: Opts) -> Result<(), Box<dyn std::error::Error
     }
 
     Ok(())
+}
+
+fn build_progress_callback(enabled: bool) -> Option<ProgressCallback> {
+    if !enabled {
+        return None;
+    }
+
+    #[derive(Debug)]
+    struct ProgressLogState {
+        last_phase: Option<BruteForceProgressPhase>,
+        last_logged_at: Instant,
+        last_sent_queries: usize,
+    }
+
+    let state = Arc::new(Mutex::new(ProgressLogState {
+        last_phase: None,
+        last_logged_at: Instant::now() - Duration::from_secs(5),
+        last_sent_queries: 0,
+    }));
+
+    Some(Arc::new(move |progress: BruteForceProgress| {
+        let mut state = match state.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+
+        let now = Instant::now();
+        let phase_changed = state.last_phase != Some(progress.phase);
+        let sending_finished = progress.sent_queries == progress.total_queries;
+        let should_log = match progress.phase {
+            BruteForceProgressPhase::SendingQueries => {
+                phase_changed
+                    || progress.sent_queries == 1
+                    || sending_finished
+                    || (now.duration_since(state.last_logged_at) >= Duration::from_secs(1)
+                        && progress.sent_queries > state.last_sent_queries)
+            }
+            BruteForceProgressPhase::WaitingForResponses => {
+                phase_changed || now.duration_since(state.last_logged_at) >= Duration::from_secs(1)
+            }
+            BruteForceProgressPhase::Completed => true,
+        };
+
+        if !should_log {
+            return;
+        }
+
+        state.last_phase = Some(progress.phase);
+        state.last_logged_at = now;
+        state.last_sent_queries = progress.sent_queries;
+
+        match progress.phase {
+            BruteForceProgressPhase::SendingQueries => {
+                let percentage = if progress.total_queries == 0 {
+                    100.0
+                } else {
+                    (progress.sent_queries as f64 / progress.total_queries as f64) * 100.0
+                };
+                info!(
+                    "发送进度: {}/{} ({:.1}%), 已发现 {}",
+                    progress.sent_queries,
+                    progress.total_queries,
+                    percentage,
+                    progress.discovered_domains
+                );
+            }
+            BruteForceProgressPhase::WaitingForResponses => {
+                info!(
+                    "等待响应: 已发送 {}, 已发现 {}",
+                    progress.sent_queries, progress.discovered_domains
+                );
+            }
+            BruteForceProgressPhase::Completed => {
+                info!(
+                    "扫描完成: 已发送 {}, 已发现 {}",
+                    progress.sent_queries, progress.discovered_domains
+                );
+            }
+        }
+    }))
+}
+
+fn resolve_cdn_detect(opts: &Opts) -> bool {
+    if opts.no_cdn_detect {
+        return false;
+    }
+
+    if opts.cdn_detect {
+        return true;
+    }
+
+    true
+}
+
+fn resolve_cdn_collapse(opts: &Opts) -> bool {
+    if opts.no_cdn_collapse {
+        return false;
+    }
+
+    if opts.cdn_collapse {
+        return true;
+    }
+
+    true
 }

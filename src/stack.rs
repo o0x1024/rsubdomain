@@ -1,66 +1,56 @@
-use log::warn;
-use std::sync::{Arc, Mutex};
-
-#[derive(Debug)]
-pub struct Node<T> {
-    data: T,
-    next: Option<Arc<Mutex<Node<T>>>>,
-}
-
 #[derive(Debug)]
 pub struct Stack<T> {
-    head: Option<Arc<Mutex<Node<T>>>>,
+    items: Vec<T>,
     pub length: usize,
 }
-impl<T: Clone> Stack<T> {
-    // Add the Clone trait bound here
+
+impl<T> Stack<T> {
     pub fn new() -> Self {
-        Stack {
-            head: None,
+        Self {
+            items: Vec::new(),
             length: 0,
         }
     }
 
     pub fn push(&mut self, data: T) {
-        let new_node = Arc::new(Mutex::new(Node { data, next: None }));
-
-        if let Some(head) = self.head.as_ref() {
-            match new_node.lock() {
-                Ok(mut node) => node.next = Some(Arc::clone(head)),
-                Err(error) => warn!("Stack lock 被 poison: {}", error),
-            }
-        }
-
-        self.head = Some(Arc::clone(&new_node));
-        self.length += 1;
+        self.items.push(data);
+        self.length = self.items.len();
     }
 
     pub fn pop(&mut self) -> Option<T> {
-        if let Some(head) = self.head.take() {
-            self.length -= 1;
-            let data = match head.lock() {
-                Ok(node) => node.data.clone(),
-                Err(error) => {
-                    warn!("Stack lock 被 poison: {}", error);
-                    return None;
-                }
-            };
-            let next = match head.lock() {
-                Ok(mut node) => node.next.take(),
-                Err(error) => {
-                    warn!("Stack lock 被 poison: {}", error);
-                    None
-                }
-            };
-            self.head = next;
-            Some(data)
-        } else {
-            None
-        }
+        let value = self.items.pop();
+        self.length = self.items.len();
+        value
     }
 
     #[allow(dead_code)]
     fn len(&self) -> usize {
-        self.length
+        self.items.len()
+    }
+}
+
+impl<T> Default for Stack<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Stack;
+
+    #[test]
+    fn stack_preserves_lifo_order() {
+        let mut stack = Stack::new();
+        stack.push(1usize);
+        stack.push(2usize);
+        stack.push(3usize);
+
+        assert_eq!(stack.length, 3);
+        assert_eq!(stack.pop(), Some(3));
+        assert_eq!(stack.pop(), Some(2));
+        assert_eq!(stack.pop(), Some(1));
+        assert_eq!(stack.pop(), None);
+        assert_eq!(stack.length, 0);
     }
 }

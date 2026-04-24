@@ -5,12 +5,14 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use std::time::Duration;
 
 use crate::api::dictionary::resolve_dictionary;
 use crate::api::{BruteForceProgress, BruteForceProgressPhase, SubdomainResult};
 use crate::handle;
 use crate::model::PacketTransport;
 use crate::recv;
+use crate::resolver_defaults::default_resolvers;
 use crate::send::SendDog;
 use crate::structs::RetryStruct;
 
@@ -36,7 +38,7 @@ impl SubdomainBruteEngine {
 
         for result in core_results {
             let should_skip = if let Some(ref detector) = self.wildcard_detector {
-                if let Ok(ip) = result.ip.parse() {
+                if let Ok(ip) = result.value.parse() {
                     detector.is_wildcard_result(&result.domain, &ip)
                 } else {
                     false
@@ -72,18 +74,21 @@ impl SubdomainBruteEngine {
         if !self.config.silent {
             info!("使用网络设备: {:?}", ether.device);
             if ether.transport == PacketTransport::Udp {
-                info!(
-                    "接口 {} 不支持二层以太网发包，已切换到 UDP 兼容模式",
-                    ether.device
-                );
+                info!("接口 {} 当前使用 UDP 兼容模式", ether.device);
             }
         }
 
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
         let flag_id: u16 = rng.gen_range(400..655);
         let device_clone = ether.device.clone();
+        let local_ip = ether.src_ip;
         let transport = ether.transport;
         let running = Arc::new(AtomicBool::new(true));
+        let dns_servers = if self.config.resolvers.is_empty() {
+            default_resolvers()
+        } else {
+            self.config.resolvers.clone()
+        };
         let sender = SendDog::new(ether, self.config.resolvers.clone(), flag_id)?;
         let udp_receiver = sender.udp_receiver_socket()?;
         let udp_local_port = sender.local_port()?;
@@ -99,6 +104,7 @@ impl SubdomainBruteEngine {
             self.config.dictionary.as_ref(),
             self.config.dictionary_file.as_deref(),
         )?;
+        let bandwidth_limiter = self.build_bandwidth_limiter();
         let total_queries = sub_domain_list
             .len()
             .saturating_mul(self.config.domains.len())
@@ -114,7 +120,14 @@ impl SubdomainBruteEngine {
             let running_clone = running.clone();
             match transport {
                 PacketTransport::Ethernet => tokio::task::spawn_blocking(move || {
-                    recv::recv(device_clone, dns_send, running_clone);
+                    recv::recv(
+                        device_clone,
+                        local_ip,
+                        dns_servers,
+                        flag_id,
+                        dns_send,
+                        running_clone,
+                    );
                 }),
                 PacketTransport::Udp => {
                     let socket = udp_receiver.ok_or("UDP兼容模式接收socket未初始化")?;
@@ -150,32 +163,6 @@ impl SubdomainBruteEngine {
             }
         };
 
-        let handle3 = {
-            let running_clone = running.clone();
-            let senddog_clone = senddog.clone();
-            let state_clone = self.state.clone();
-            let max_retries = self.config.max_retries;
-            tokio::spawn(async move {
-                Self::handle_timeout_domains_with_state(
-                    running_clone,
-                    senddog_clone,
-                    retry_send,
-                    state_clone,
-                    max_retries,
-                )
-                .await;
-            })
-        };
-
-        let handle4 = {
-            let running_clone = running.clone();
-            let senddog_clone = senddog.clone();
-            tokio::spawn(async move {
-                Self::handle_retry_domains_static(running_clone, senddog_clone, retry_recv).await;
-            })
-        };
-
-        let bandwidth_limiter = self.build_bandwidth_limiter();
         let query_count = self
             .send_dns_queries(
                 &senddog,
@@ -189,10 +176,60 @@ impl SubdomainBruteEngine {
             info!("子域名查询数量: {}", query_count);
         }
 
+        let handle3 = {
+            let running_clone = running.clone();
+            let senddog_clone = senddog.clone();
+            let state_clone = self.state.clone();
+            let max_retries = self.config.max_retries;
+            let dns_timeout_seconds = self.config.dns_timeout_seconds;
+            tokio::spawn(async move {
+                Self::handle_timeout_domains_with_state(
+                    running_clone,
+                    senddog_clone,
+                    retry_send,
+                    state_clone,
+                    max_retries,
+                    dns_timeout_seconds,
+                )
+                .await;
+            })
+        };
+
+        let handle4 = {
+            let running_clone = running.clone();
+            let senddog_clone = senddog.clone();
+            let state_clone = self.state.clone();
+            let bandwidth_limiter = bandwidth_limiter.clone();
+            tokio::spawn(async move {
+                Self::handle_retry_domains_static(
+                    running_clone,
+                    senddog_clone,
+                    state_clone,
+                    retry_recv,
+                    bandwidth_limiter,
+                )
+                .await;
+            })
+        };
+
         self.wait_for_completion(query_count).await;
         running.store(false, Ordering::Relaxed);
 
-        let _ = tokio::join!(handle1, handle2, handle3, handle4);
+        match transport {
+            PacketTransport::Ethernet => {
+                if tokio::time::timeout(Duration::from_secs(2), handle1)
+                    .await
+                    .is_err()
+                    && !self.config.silent
+                {
+                    warn!("以太网接收线程在退出宽限期内未结束，跳过等待以避免进程卡住");
+                }
+            }
+            PacketTransport::Udp => {
+                let _ = handle1.await;
+            }
+        }
+        let _ = tokio::join!(handle2, handle3, handle4);
         drop(senddog);
 
         let results = self.collect_discovered_results();

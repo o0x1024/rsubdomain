@@ -4,8 +4,8 @@ use crate::api::SubdomainResult;
 #[cfg(feature = "dns-resolver")]
 use crate::dns_resolver::{DnsRecord, DnsResolveResult};
 use crate::handle::{
-    AggregatedDiscoveredDomain, AggregatedRecordValues, DiscoveredDomain, SummaryStats,
-    VerificationResult,
+    AggregatedDiscoveredDomain, AggregatedRecordValues, CdnEvidence, DiscoveredDomain,
+    SummaryStats, VerificationResult,
 };
 #[cfg(feature = "verify")]
 use crate::verify::VerifyResult;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableDiscoveredDomain {
     pub domain: String,
-    pub ip: String,
+    pub value: String,
     pub query_type: String,
     pub record_type: String,
     pub timestamp: u64,
@@ -41,11 +41,24 @@ pub struct SerializableAggregatedRecordValues {
     pub values: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerializableCdnEvidence {
+    pub source: String,
+    pub value: String,
+    pub detail: String,
+}
+
 /// 可序列化的聚合域名结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableAggregatedDiscoveredDomain {
     pub domain: String,
     pub records: Vec<SerializableAggregatedRecordValues>,
+    pub has_cdn: bool,
+    pub possible_cdn: bool,
+    pub cdn_provider: Option<String>,
+    pub cdn_confidence: Option<String>,
+    pub cdn_evidence: Vec<SerializableCdnEvidence>,
+    pub cdn_signals: Vec<SerializableCdnEvidence>,
     pub raw_record_count: usize,
     pub first_seen: u64,
     pub last_seen: u64,
@@ -76,7 +89,7 @@ pub struct SerializableDnsResolveResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SerializableSubdomainResult {
     pub domain: String,
-    pub ip: String,
+    pub value: String,
     pub query_type: String,
     pub record_type: String,
     pub timestamp: u64,
@@ -93,6 +106,10 @@ pub struct SerializableSummaryStats {
     pub unique_ips: Vec<String>,
     pub ip_ranges: std::collections::HashMap<String, Vec<String>>,
     pub record_types: std::collections::HashMap<String, usize>,
+    pub cdn_domains: usize,
+    pub suspected_cdn_domains: usize,
+    pub cdn_providers: std::collections::HashMap<String, usize>,
+    pub cdn_confidence: std::collections::HashMap<String, usize>,
     pub verified_domains: usize,
     pub alive_domains: usize,
 }
@@ -117,7 +134,7 @@ impl From<DiscoveredDomain> for SerializableDiscoveredDomain {
 
         SerializableDiscoveredDomain {
             domain: domain.domain,
-            ip: domain.ip,
+            value: domain.value,
             query_type: domain.query_type.to_string(),
             record_type: domain.record_type,
             timestamp: domain.timestamp,
@@ -149,11 +166,27 @@ impl From<AggregatedRecordValues> for SerializableAggregatedRecordValues {
     }
 }
 
+impl From<CdnEvidence> for SerializableCdnEvidence {
+    fn from(evidence: CdnEvidence) -> Self {
+        Self {
+            source: evidence.source,
+            value: evidence.value,
+            detail: evidence.detail,
+        }
+    }
+}
+
 impl From<AggregatedDiscoveredDomain> for SerializableAggregatedDiscoveredDomain {
     fn from(domain: AggregatedDiscoveredDomain) -> Self {
         SerializableAggregatedDiscoveredDomain {
             domain: domain.domain,
             records: domain.records.into_iter().map(Into::into).collect(),
+            has_cdn: domain.has_cdn,
+            possible_cdn: domain.possible_cdn,
+            cdn_provider: domain.cdn_provider,
+            cdn_confidence: domain.cdn_confidence.map(|value| value.to_string()),
+            cdn_evidence: domain.cdn_evidence.into_iter().map(Into::into).collect(),
+            cdn_signals: domain.cdn_signals.into_iter().map(Into::into).collect(),
             raw_record_count: domain.raw_record_count,
             first_seen: domain.first_seen,
             last_seen: domain.last_seen,
@@ -206,7 +239,7 @@ impl From<SubdomainResult> for SerializableSubdomainResult {
 
         SerializableSubdomainResult {
             domain: result.domain,
-            ip: result.ip,
+            value: result.value,
             query_type: result.query_type.to_string(),
             record_type: result.record_type,
             timestamp: result.timestamp,
@@ -231,6 +264,10 @@ impl From<SummaryStats> for SerializableSummaryStats {
             unique_ips: stats.unique_ips.into_iter().collect(),
             ip_ranges: stats.ip_ranges,
             record_types: stats.record_types,
+            cdn_domains: stats.cdn_domains,
+            suspected_cdn_domains: stats.suspected_cdn_domains,
+            cdn_providers: stats.cdn_providers,
+            cdn_confidence: stats.cdn_confidence,
             verified_domains: stats.verified_domains,
             alive_domains: stats.alive_domains,
         }
@@ -260,7 +297,7 @@ mod tests {
     fn subdomain_result_conversion_preserves_query_type() {
         let result = SubdomainResult {
             domain: "www.example.com".to_string(),
-            ip: "1.1.1.1".to_string(),
+            value: "1.1.1.1".to_string(),
             query_type: QueryType::Aaaa,
             record_type: "AAAA".to_string(),
             timestamp: 1,
@@ -273,6 +310,7 @@ mod tests {
         let serializable = SerializableSubdomainResult::from(result);
 
         assert_eq!(serializable.query_type, "AAAA");
+        assert_eq!(serializable.value, "1.1.1.1");
         assert_eq!(serializable.record_type, "AAAA");
         assert_eq!(serializable.formatted_time, "1970-01-01 00:00:01");
     }

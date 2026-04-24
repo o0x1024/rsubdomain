@@ -123,6 +123,15 @@ cat domains.txt | ./rsubdomain --stdin
 
 # Combine verification and record resolution
 ./rsubdomain -d example.com -v --resolve-records
+
+# Disable CDN detection in the aggregated asset view
+./rsubdomain -d example.com --no-cdn-detect
+
+# Keep all CDN-backed A/AAAA records in the aggregated asset view
+./rsubdomain -d example.com --resolve-records --no-cdn-collapse
+
+# Print summary with CDN statistics
+./rsubdomain -d example.com --resolve-records --summary
 ```
 
 ### Output and statistics
@@ -164,16 +173,57 @@ cat domains.txt | ./rsubdomain --stdin
 | `-b` | `--bandwidth` | Bandwidth limit (`K` / `M` / `G`) | `3M` |
 | `-v` | `--verify` | Enable HTTP/HTTPS verification | `false` |
 |  | `--retry` | Max retries after DNS timeout | `5` |
-|  | `--wait-seconds` | Max wait time after sending packets | `300` |
+|  | `--wait-seconds` | Max wait time after sending packets | `10` |
 |  | `--verify-timeout` | HTTP/HTTPS verification timeout in seconds | `10` |
 |  | `--verify-concurrency` | HTTP/HTTPS verification concurrency | `50` |
 |  | `--resolve-records` | Resolve DNS records | `false` |
+|  | `--cdn-detect` | Explicitly enable CDN detection in the aggregated asset view | `true` |
+|  | `--no-cdn-detect` | Disable CDN detection in the aggregated asset view | `false` |
+|  | `--cdn-collapse` | Explicitly collapse CDN-backed `A/AAAA` values in the aggregated view | `true` |
+|  | `--no-cdn-collapse` | Keep all CDN-backed `A/AAAA` values in the aggregated view | `false` |
 |  | `--qtype` | Query types to send (`a/aaaa/cname/mx/ns/txt`) | `a` |
 | `-e` | `--device` | Specify a network device manually | Auto-detect |
 | `-o` | `--output` | Output file path | - |
 |  | `--format` | Output format (`json/xml/csv/txt`) | `json` |
 |  | `--summary` | Show summary statistics | `false` |
 |  | `--raw-records` | Print raw DNS records instead of the aggregated host view | `false` |
+
+## CDN asset view
+
+- The default output is asset-oriented. It shows only the direct records on the queried hostname and does not expand a `CNAME -> A/AAAA` chain.
+- The default terminal view is the aggregated domain view. Use `--raw-records` if you want every discovered record.
+- When a domain is classified as CDN-backed, the aggregated view marks it as `CDN(confidence): provider`.
+- CDN-backed `A/AAAA` values are collapsed to one representative value by default in the aggregated view, while `raw_record_count` preserves the real count.
+- Use `--no-cdn-collapse` to keep every CDN-backed `A/AAAA` value, or `--no-cdn-detect` to disable CDN classification entirely.
+
+### Evidence sources
+
+- `CNAME`: strongest signal for typical CDN onboarding domains
+- `NS`: strong signal when authoritative DNS is delegated into a CDN platform
+- `PTR`: useful for direct `A/AAAA` CDN edges; requires `--resolve-records`
+- `IP_RANGE`: useful for CDN-backed IPs without meaningful PTR names
+- `MULTI_A/MULTI_AAAA`: weak signal only; multiple IPs may mean CDN, but may also just mean load balancing or multi-region deployment
+
+### Confidence levels
+
+- `high`: suffix-based `CNAME/NS` match, or `PTR + IP_RANGE`
+- `medium`: `PTR` only or `IP_RANGE` only
+- `low`: weak name-pattern match only
+
+### Possible CDN
+
+- `has_cdn` is reserved for explicit CDN classification with strong or medium evidence.
+- `possible_cdn` is reserved for weak signals, currently `MULTI_A` and `MULTI_AAAA`.
+- `possible_cdn` does not trigger CDN IP collapsing and does not count toward `cdn_domains`.
+
+### Rule files
+
+- `data/cdn_rules.txt`
+  One rule per line: `Provider,suffix:example.cdn.net,contains:.vendor.`
+- `data/cdn_ip_ranges.txt`
+  One rule per line: `Provider,203.0.113.0/24`
+- `suffix:` uses strict domain-boundary matching.
+- `contains:` is only for patterns that truly need substring matching.
 
 ## Technical notes
 
@@ -191,7 +241,7 @@ cat domains.txt | ./rsubdomain --stdin
 
 ```toml
 [dependencies]
-rsubdomain = "1.2.13"
+rsubdomain = "1.2.14"
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -199,7 +249,7 @@ If you only want the core library without CLI / verification / DNS record resolu
 
 ```toml
 [dependencies]
-rsubdomain = { version = "1.2.13", default-features = false }
+rsubdomain = { version = "1.2.14", default-features = false }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -223,6 +273,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
     ).await?;
 
+    println!("found {} subdomains", results.len());
+    Ok(())
+}
+```
+
+### Advanced config
+
+```rust
+use rsubdomain::{QueryType, SubdomainBruteConfig, SubdomainBruteEngine};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = SubdomainBruteConfig {
+        domains: vec!["example.com".to_string()],
+        verify_mode: true,
+        resolve_records: true,
+        cdn_detect: true,
+        cdn_collapse: true,
+        query_types: vec![QueryType::A, QueryType::Cname, QueryType::Txt],
+        ..Default::default()
+    };
+
+    let engine = SubdomainBruteEngine::new(config).await?;
+    let results = engine.run_brute_force().await?;
     println!("found {} subdomains", results.len());
     Ok(())
 }

@@ -95,26 +95,20 @@ fn process_dns_response(
 
     let tid = message.id() / 100;
     if tid == flag_id {
-        let request_context = update_local_status(message.id(), destination_port, state);
+        let Some(request_context) = update_local_status(message.id(), destination_port, state)
+        else {
+            return;
+        };
+        record_dns_success(state, &request_context);
         if !message.answers().is_empty() {
-            let query_name = request_context
-                .as_ref()
-                .map(|status| status.domain.clone())
-                .or_else(|| {
-                    message
-                        .queries()
-                        .first()
-                        .map(|query| normalize_domain(query.name().to_utf8()))
-                })
-                .unwrap_or_default();
-            let query_type = request_context
-                .as_ref()
-                .map(|status| status.query_type)
-                .or_else(|| infer_query_type(message))
-                .unwrap_or(QueryType::A);
+            let query_name = request_context.domain.clone();
+            let query_type = request_context.query_type;
             let timestamp = chrono::Utc::now().timestamp() as u64;
 
             for answer in message.answers() {
+                if !is_direct_answer(&query_name, &answer.name().to_utf8()) {
+                    continue;
+                }
                 if let Some(discovered) =
                     discovered_from_record(&query_name, query_type, answer.data(), timestamp)
                 {
@@ -137,26 +131,19 @@ fn process_dns_response_by_message_id(
         return;
     }
 
-    let request_context = update_local_status_by_message_id(message.id(), state);
+    let Some(request_context) = update_local_status_by_message_id(message.id(), state) else {
+        return;
+    };
+    record_dns_success(state, &request_context);
     if !message.answers().is_empty() {
-        let query_name = request_context
-            .as_ref()
-            .map(|status| status.domain.clone())
-            .or_else(|| {
-                message
-                    .queries()
-                    .first()
-                    .map(|query| normalize_domain(query.name().to_utf8()))
-            })
-            .unwrap_or_default();
-        let query_type = request_context
-            .as_ref()
-            .map(|status| status.query_type)
-            .or_else(|| infer_query_type(message))
-            .unwrap_or(QueryType::A);
+        let query_name = request_context.domain.clone();
+        let query_type = request_context.query_type;
         let timestamp = chrono::Utc::now().timestamp() as u64;
 
         for answer in message.answers() {
+            if !is_direct_answer(&query_name, &answer.name().to_utf8()) {
+                continue;
+            }
             if let Some(discovered) =
                 discovered_from_record(&query_name, query_type, answer.data(), timestamp)
             {
@@ -175,7 +162,7 @@ fn discovered_from_record(
     data: Option<&RData>,
     timestamp: u64,
 ) -> Option<DiscoveredDomain> {
-    let (ip, record_type) = match data? {
+    let (value, record_type) = match data? {
         RData::A(ip) => (ip.to_string(), "A".to_string()),
         RData::AAAA(ip) => (ip.to_string(), "AAAA".to_string()),
         RData::CNAME(name) => (normalize_domain(name.to_utf8()), "CNAME".to_string()),
@@ -202,7 +189,7 @@ fn discovered_from_record(
 
     Some(DiscoveredDomain {
         domain: query_name.to_string(),
-        ip,
+        value,
         query_type,
         record_type,
         timestamp,
@@ -213,11 +200,9 @@ fn normalize_domain(domain: String) -> String {
     domain.trim_end_matches('.').to_string()
 }
 
-fn infer_query_type(message: &Message) -> Option<QueryType> {
-    message
-        .queries()
-        .first()
-        .and_then(|query| query.query_type().to_string().parse().ok())
+fn is_direct_answer(query_name: &str, answer_name: &str) -> bool {
+    normalize_domain(query_name.to_string())
+        .eq_ignore_ascii_case(&normalize_domain(answer_name.to_string()))
 }
 
 fn update_local_status(
@@ -229,8 +214,10 @@ fn update_local_status(
     let request_context = state
         .search_from_index_and_delete(index as u32)
         .ok()
-        .map(|retry| retry.v);
-    state.push_to_stack(index as usize);
+        .map(|retry| {
+            state.push_to_stack(index as usize);
+            retry.v
+        });
     request_context
 }
 
@@ -241,7 +228,42 @@ fn update_local_status_by_message_id(
     let request_context = state
         .search_from_index_and_delete(message_id as u32)
         .ok()
-        .map(|retry| retry.v);
-    state.push_to_stack(message_id as usize);
+        .map(|retry| {
+            state.push_to_stack(message_id as usize);
+            retry.v
+        });
     request_context
+}
+
+fn record_dns_success(state: &BruteForceState, request_context: &StatusTable) {
+    let now_millis = chrono::Utc::now().timestamp_millis() as u64;
+    let rtt_millis = now_millis.saturating_sub(request_context.time) as f64;
+    state.record_resolver_success(&request_context.dns, rtt_millis);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_direct_answer, update_local_status};
+    use crate::state::BruteForceState;
+
+    #[test]
+    fn direct_answer_match_ignores_trailing_dot_and_case() {
+        assert!(is_direct_answer("WWW.Example.com", "www.example.com."));
+    }
+
+    #[test]
+    fn direct_answer_match_rejects_cname_chain_target() {
+        assert!(!is_direct_answer(
+            "m.mgtv.com",
+            "jxy4ydd5.sched.sma-dk.tdnsstic1.cn."
+        ));
+    }
+
+    #[test]
+    fn missing_request_context_does_not_recycle_stack_index() {
+        let state = BruteForceState::new();
+
+        assert!(update_local_status(1201, 10053, &state).is_none());
+        assert!(state.pop_from_stack().is_none());
+    }
 }

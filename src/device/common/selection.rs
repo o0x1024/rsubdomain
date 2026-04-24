@@ -5,19 +5,20 @@ use crate::model::{EthTable, PacketTransport};
 
 use super::choose_probe_target;
 use super::probing::{
-    default_probe_target, first_ipv4_on_interface, resolve_best_device,
+    build_udp_compatible_device, default_probe_target, first_ipv4_on_interface, resolve_best_device,
     resolve_next_hop_mac_on_interface,
 };
 
 /// 根据设备名称获取设备信息
 pub fn get_device_by_name(device_name: &str) -> Result<EthTable, String> {
-    get_device_by_name_for_dns(device_name, &[])
+    get_device_by_name_for_dns(device_name, &[], PacketTransport::Ethernet)
 }
 
 /// 根据设备名称和DNS服务器获取设备信息
 pub fn get_device_by_name_for_dns(
     device_name: &str,
     dns_servers: &[String],
+    transport: PacketTransport,
 ) -> Result<EthTable, String> {
     let probe_target = choose_probe_target(dns_servers)
         .ok_or_else(|| "未找到可用于原始发包的DNS探测目标".to_string())?;
@@ -38,10 +39,24 @@ pub fn get_device_by_name_for_dns(
         }
     }
 
-    if let Some(src_mac) = interface.mac {
+    if transport == PacketTransport::Udp {
+        return Ok(build_udp_compatible_device(src_ip, interface.name));
+    }
+
+    {
+        let src_mac = interface.mac.ok_or_else(|| {
+            format!(
+                "接口 {} 缺少MAC地址，无法进行二层以太网发包",
+                interface.name
+            )
+        })?;
         let next_hop_ip = route.gateway.unwrap_or(probe_target);
-        let dst_mac =
-            resolve_next_hop_mac_on_interface(src_ip, probe_target, next_hop_ip, &interface.name)?;
+        let dst_mac = resolve_next_hop_mac_on_interface(
+            src_ip,
+            probe_target,
+            next_hop_ip,
+            &interface.name,
+        )?;
 
         return Ok(EthTable {
             src_ip,
@@ -51,23 +66,18 @@ pub fn get_device_by_name_for_dns(
             transport: PacketTransport::Ethernet,
         });
     }
-
-    Ok(EthTable {
-        src_ip,
-        device: interface.name,
-        src_mac: pnet::util::MacAddr::zero(),
-        dst_mac: pnet::util::MacAddr::zero(),
-        transport: PacketTransport::Udp,
-    })
 }
 
 /// 自动检测并选择最佳网络设备
 pub async fn auto_get_devices() -> Result<EthTable, String> {
-    auto_get_devices_for_dns(&[]).await
+    auto_get_devices_for_dns(&[], PacketTransport::Ethernet).await
 }
 
 /// 根据DNS服务器自动检测网络设备
-pub async fn auto_get_devices_for_dns(dns_servers: &[String]) -> Result<EthTable, String> {
+pub async fn auto_get_devices_for_dns(
+    dns_servers: &[String],
+    transport: PacketTransport,
+) -> Result<EthTable, String> {
     let probe_target = choose_probe_target(dns_servers).unwrap_or_else(default_probe_target);
-    resolve_best_device(probe_target)
+    resolve_best_device(probe_target, transport)
 }

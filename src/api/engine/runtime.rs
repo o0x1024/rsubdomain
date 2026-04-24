@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::send;
 use crate::send::SendDog;
+use crate::speed_test::BandwidthLimiter;
 use crate::state::BruteForceState;
 use crate::structs::RetryStruct;
 
@@ -22,34 +23,43 @@ impl SubdomainBruteEngine {
         retry_send: mpsc::Sender<Arc<std::sync::RwLock<RetryStruct>>>,
         state: BruteForceState,
         max_retries: u8,
+        dns_timeout_seconds: u64,
     ) {
         while running.load(Ordering::Relaxed) {
             let max_length = (1000000 / 10) as usize;
-            let datas = state.get_timeout_data(max_length);
+            let datas = state.get_timeout_data(max_length, dns_timeout_seconds);
             let is_delay = datas.len() > 100;
 
             for local_data in &datas {
+                if !running.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 let index = local_data.index;
                 let mut value = local_data.v.clone();
 
                 if value.retry >= max_retries as isize {
-                    let _ = state.search_from_index_and_delete(index as u32);
                     continue;
                 }
 
                 let dns_name = match senddog.lock() {
-                    Ok(guard) => guard.chose_dns(),
+                    Ok(guard) => state
+                        .choose_resolver(guard.resolvers(), &value.domain)
+                        .unwrap_or_else(|| guard.resolvers()[0].clone()),
                     Err(error) => {
                         warn!("无法锁定 senddog: {}", error);
                         continue;
                     }
                 };
 
+                state.record_resolver_timeout(&value.dns);
                 value.retry += 1;
-                value.time = chrono::Utc::now().timestamp() as u64;
+                let now_millis = chrono::Utc::now().timestamp_millis() as u64;
+                let timeout_seconds = state.current_dns_timeout_seconds(dns_timeout_seconds);
+                value.time = now_millis;
+                value.timeout_at = now_millis + timeout_seconds.saturating_mul(1000);
                 value.dns = dns_name;
                 let value_clone = value.clone();
-                let _ = state.search_from_index_and_delete(index as u32);
                 state.append_status(value_clone, index as u32);
 
                 let (flag_id, src_port) = send::generate_flag_index_from_map(index as usize);
@@ -61,9 +71,11 @@ impl SubdomainBruteEngine {
                     flag_id,
                 };
 
-                if let Err(error) = retry_send.send(Arc::new(std::sync::RwLock::new(retry_struct)))
-                {
-                    warn!("重试队列已关闭，无法发送重试数据: {}", error);
+                if let Err(error) = retry_send.send(Arc::new(std::sync::RwLock::new(retry_struct))) {
+                    if running.load(Ordering::Relaxed) {
+                        warn!("重试队列已关闭，无法发送重试数据: {}", error);
+                    }
+                    break;
                 }
 
                 if is_delay {
@@ -81,31 +93,60 @@ impl SubdomainBruteEngine {
     pub(super) async fn handle_retry_domains_static(
         running: Arc<AtomicBool>,
         senddog: Arc<Mutex<SendDog>>,
+        state: BruteForceState,
         retry_recv: mpsc::Receiver<Arc<std::sync::RwLock<RetryStruct>>>,
+        bandwidth_limiter: Option<BandwidthLimiter>,
     ) {
         while running.load(Ordering::Relaxed) {
             match retry_recv.recv_timeout(Duration::from_millis(1000)) {
-                Ok(res) => match res.read() {
-                    Ok(retry_data) => match senddog.lock() {
+                Ok(res) => {
+                    let retry_payload = match res.read() {
+                        Ok(retry_data) => (
+                            retry_data.domain.clone(),
+                            retry_data.dns.clone(),
+                            retry_data.query_type,
+                            retry_data.src_port,
+                            retry_data.flag_id,
+                        ),
+                        Err(_) => {
+                            warn!("无法读取重试数据");
+                            continue;
+                        }
+                    };
+
+                    let (retry_domain, retry_dns, retry_query_type, retry_src_port, retry_flag_id) =
+                        retry_payload;
+
+                    if let Some(limiter) = &bandwidth_limiter {
+                        let packet_size = match senddog.lock() {
+                            Ok(guard) => guard.estimate_packet_size(&retry_domain) as u64,
+                            Err(_) => {
+                                warn!("无法获取 senddog 锁");
+                                continue;
+                            }
+                        };
+
+                        limiter.acquire(packet_size).await;
+                    }
+
+                    match senddog.lock() {
                         Ok(senddog) => {
                             if let Err(error) = senddog.send(
-                                retry_data.domain.clone(),
-                                retry_data.dns.clone(),
-                                retry_data.query_type,
-                                retry_data.src_port,
-                                retry_data.flag_id,
+                                retry_domain,
+                                retry_dns.clone(),
+                                retry_query_type,
+                                retry_src_port,
+                                retry_flag_id,
                             ) {
+                                state.record_resolver_failure(&retry_dns);
                                 warn!("重试发送失败: {}", error);
                             }
                         }
                         Err(_) => {
                             warn!("无法获取 senddog 锁");
                         }
-                    },
-                    Err(_) => {
-                        warn!("无法读取重试数据");
                     }
-                },
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }

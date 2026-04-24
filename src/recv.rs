@@ -2,19 +2,31 @@ use log::{error, warn};
 use pnet::datalink;
 use pnet::datalink::Channel::Ethernet;
 use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::udp::UdpPacket;
 use pnet::packet::Packet;
-use std::net::UdpSocket;
+use std::net::{Ipv4Addr, UdpSocket};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc::{self, RecvTimeoutError},
-    Arc,
+    mpsc, Arc,
 };
-use std::thread;
 use std::time::Duration;
+use trust_dns_resolver::proto::op::{Message, MessageType};
 
-pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<AtomicBool>) {
+pub fn recv(
+    device: String,
+    local_ip: Ipv4Addr,
+    dns_servers: Vec<String>,
+    flag_id: u16,
+    dns_send: mpsc::Sender<Arc<Vec<u8>>>,
+    running: Arc<AtomicBool>,
+) {
     let interfaces = datalink::interfaces();
+    let resolver_ips = dns_servers
+        .into_iter()
+        .filter_map(|server| server.parse::<Ipv4Addr>().ok())
+        .collect::<Vec<_>>();
 
     let interface = match interfaces
         .iter()
@@ -44,66 +56,35 @@ pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<A
         }
     };
 
-    // 创建一个通道来在线程间传递数据包
-    let (packet_sender, packet_receiver) = mpsc::channel();
-    let running_clone = running.clone();
-
-    // 在单独的线程中处理数据包接收
-    let capture_handle = thread::spawn(move || {
-        while running_clone.load(Ordering::Relaxed) {
-            match rx.next() {
-                Ok(packet) => {
-                    // 检查是否需要停止
-                    if !running_clone.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let packet_data = packet.to_vec();
-                    if packet_sender.send(Ok(packet_data)).is_err() {
-                        // 接收端已关闭，退出线程
-                        break;
-                    }
-                }
-                Err(e) => {
-                    // 检查是否是超时错误（这是正常的）
-                    if e.kind() == std::io::ErrorKind::TimedOut {
-                        // 超时是正常的，继续循环
-                        continue;
-                    }
-
-                    if packet_sender.send(Err(e)).is_err() {
-                        // 接收端已关闭，退出线程
-                        break;
-                    }
-                    break; // 出现其他错误时退出
-                }
-            }
-        }
-        drop(rx);
-    });
-
     let mut consecutive_errors = 0;
     const MAX_CONSECUTIVE_ERRORS: u32 = 10;
 
-    // 主循环处理接收到的数据包
     while running.load(Ordering::Relaxed) {
-        match packet_receiver.recv_timeout(Duration::from_millis(500)) {
-            Ok(Ok(packet_data)) => {
+        match rx.next() {
+            Ok(packet) => {
                 consecutive_errors = 0;
-                if let Some(ethernet) = EthernetPacket::new(&packet_data) {
-                    if let Some(ipv4) = Ipv4Packet::new(ethernet.payload()) {
-                        let ipv4_data = ipv4.packet().to_vec();
-                        let cloned_ipv4: Arc<Vec<u8>> = Arc::new(ipv4_data);
-                        match dns_send.send(cloned_ipv4) {
-                            Ok(_) => {}
-                            Err(error) => {
-                                warn!("发送抓到的数据包失败: {}", error);
-                                break; // 如果发送失败，可能是接收端已关闭
-                            }
-                        }
+                let Some(ipv4_payload) = extract_forwardable_ipv4_payload(
+                    packet,
+                    local_ip,
+                    &resolver_ips,
+                    flag_id,
+                ) else {
+                    continue;
+                };
+
+                let cloned_ipv4: Arc<Vec<u8>> = Arc::new(ipv4_payload);
+                match dns_send.send(cloned_ipv4) {
+                    Ok(_) => {}
+                    Err(error) => {
+                        warn!("发送抓到的数据包失败: {}", error);
+                        break;
                     }
                 }
             }
-            Ok(Err(error)) => {
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+                continue;
+            }
+            Err(error) => {
                 consecutive_errors += 1;
                 warn!("读取数据链路通道时发生错误: {}", error);
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
@@ -111,25 +92,11 @@ pub fn recv(device: String, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<A
                     break;
                 }
             }
-            Err(RecvTimeoutError::Timeout) => {
-                // 超时是正常的，继续循环检查running标志
-                continue;
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                // 发送端断开连接，退出
-                break;
-            }
         }
     }
 
-    // 显式清理资源，确保底层网络句柄被正确释放
-    drop(packet_receiver);
     drop(dns_send);
-
-    // 等待数据包捕获线程结束
-    if let Err(error) = capture_handle.join() {
-        warn!("等待抓包线程结束失败: {:?}", error);
-    }
+    drop(rx);
 }
 
 pub fn recv_udp(socket: UdpSocket, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running: Arc<AtomicBool>) {
@@ -154,5 +121,159 @@ pub fn recv_udp(socket: UdpSocket, dns_send: mpsc::Sender<Arc<Vec<u8>>>, running
                 break;
             }
         }
+    }
+}
+
+fn extract_forwardable_ipv4_payload(
+    packet_data: &[u8],
+    local_ip: Ipv4Addr,
+    resolver_ips: &[Ipv4Addr],
+    flag_id: u16,
+) -> Option<Vec<u8>> {
+    let Some(ethernet) = EthernetPacket::new(packet_data) else {
+        return None;
+    };
+    let Some(ipv4) = Ipv4Packet::new(ethernet.payload()) else {
+        return None;
+    };
+    if ipv4.get_next_level_protocol() != IpNextHeaderProtocols::Udp {
+        return None;
+    }
+    if ipv4.get_destination() != local_ip {
+        return None;
+    }
+    if !resolver_ips.contains(&ipv4.get_source()) {
+        return None;
+    }
+
+    let Some(udp) = UdpPacket::new(ipv4.payload()) else {
+        return None;
+    };
+
+    if udp.get_source() != 53 {
+        return None;
+    }
+
+    let Ok(message) = Message::from_vec(udp.payload()) else {
+        return None;
+    };
+
+    if message.message_type() != MessageType::Response || message.id() / 100 != flag_id {
+        return None;
+    }
+
+    Some(ipv4.packet().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use pnet::packet::ethernet::{EtherTypes, MutableEthernetPacket};
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::MutableIpv4Packet;
+    use pnet::packet::udp::MutableUdpPacket;
+    use pnet::packet::MutablePacket;
+
+    use super::extract_forwardable_ipv4_payload;
+
+    fn build_udp_ethernet_packet(
+        src_ip: Ipv4Addr,
+        dst_ip: Ipv4Addr,
+        src_port: u16,
+        dst_port: u16,
+        dns_message_id: u16,
+    ) -> Vec<u8> {
+        let mut buffer = vec![0u8; 14 + 20 + 8 + 12];
+        {
+            let mut ethernet = MutableEthernetPacket::new(&mut buffer).unwrap();
+            ethernet.set_ethertype(EtherTypes::Ipv4);
+
+            let mut ipv4 = MutableIpv4Packet::new(ethernet.payload_mut()).unwrap();
+            ipv4.set_version(4);
+            ipv4.set_header_length(5);
+            ipv4.set_total_length(40);
+            ipv4.set_ttl(64);
+            ipv4.set_next_level_protocol(IpNextHeaderProtocols::Udp);
+            ipv4.set_source(src_ip);
+            ipv4.set_destination(dst_ip);
+
+            let mut udp = MutableUdpPacket::new(ipv4.payload_mut()).unwrap();
+            udp.set_source(src_port);
+            udp.set_destination(dst_port);
+            udp.set_length(20);
+            let payload = udp.payload_mut();
+            payload[0] = (dns_message_id >> 8) as u8;
+            payload[1] = dns_message_id as u8;
+            payload[2] = 0x81;
+            payload[3] = 0x80;
+        }
+        buffer
+    }
+
+    #[test]
+    fn forwards_only_expected_dns_response_packets() {
+        let packet = build_udp_ethernet_packet(
+            Ipv4Addr::new(223, 5, 5, 5),
+            Ipv4Addr::new(10, 0, 0, 2),
+            53,
+            12000,
+            41234,
+        );
+
+        assert!(extract_forwardable_ipv4_payload(
+            &packet,
+            Ipv4Addr::new(10, 0, 0, 2),
+            &[Ipv4Addr::new(223, 5, 5, 5)],
+            412
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn rejects_dns_packets_from_unexpected_source_or_port() {
+        let wrong_resolver = build_udp_ethernet_packet(
+            Ipv4Addr::new(8, 8, 8, 8),
+            Ipv4Addr::new(10, 0, 0, 2),
+            53,
+            12000,
+            41234,
+        );
+        let wrong_port = build_udp_ethernet_packet(
+            Ipv4Addr::new(223, 5, 5, 5),
+            Ipv4Addr::new(10, 0, 0, 2),
+            5353,
+            12000,
+            41234,
+        );
+        let wrong_flag_id = build_udp_ethernet_packet(
+            Ipv4Addr::new(223, 5, 5, 5),
+            Ipv4Addr::new(10, 0, 0, 2),
+            53,
+            12000,
+            51123,
+        );
+
+        assert!(extract_forwardable_ipv4_payload(
+            &wrong_resolver,
+            Ipv4Addr::new(10, 0, 0, 2),
+            &[Ipv4Addr::new(223, 5, 5, 5)],
+            412
+        )
+        .is_none());
+        assert!(extract_forwardable_ipv4_payload(
+            &wrong_port,
+            Ipv4Addr::new(10, 0, 0, 2),
+            &[Ipv4Addr::new(223, 5, 5, 5)],
+            412
+        )
+        .is_none());
+        assert!(extract_forwardable_ipv4_payload(
+            &wrong_flag_id,
+            Ipv4Addr::new(10, 0, 0, 2),
+            &[Ipv4Addr::new(223, 5, 5, 5)],
+            412
+        )
+        .is_none());
     }
 }

@@ -1,7 +1,7 @@
 use std::fmt;
 
 use super::ProgressCallback;
-use crate::QueryType;
+use crate::{PacketTransport, QueryType};
 
 /// 域名暴破配置
 #[derive(Clone)]
@@ -22,6 +22,8 @@ pub struct SubdomainBruteConfig {
     pub verify_mode: bool,
     /// DNS查询超时后的最大重试次数
     pub max_retries: u8,
+    /// DNS响应超时时间（秒）
+    pub dns_timeout_seconds: u64,
     /// 发包完成后的最大等待时间（秒）
     pub max_wait_seconds: u64,
     /// HTTP/HTTPS验证超时时间（秒）
@@ -30,6 +32,10 @@ pub struct SubdomainBruteConfig {
     pub verify_concurrency: usize,
     /// 是否解析DNS记录
     pub resolve_records: bool,
+    /// 是否启用CDN识别
+    pub cdn_detect: bool,
+    /// 是否在聚合视图中收敛CDN的多IP记录
+    pub cdn_collapse: bool,
     /// 主动发送的DNS查询类型
     pub query_types: Vec<QueryType>,
     /// 是否静默模式
@@ -38,6 +44,8 @@ pub struct SubdomainBruteConfig {
     pub raw_records: bool,
     /// 网络设备名称
     pub device: Option<String>,
+    /// 网络传输模式
+    pub transport: PacketTransport,
     /// 进度回调
     pub progress_callback: Option<ProgressCallback>,
 }
@@ -53,14 +61,18 @@ impl fmt::Debug for SubdomainBruteConfig {
             .field("bandwidth_limit", &self.bandwidth_limit)
             .field("verify_mode", &self.verify_mode)
             .field("max_retries", &self.max_retries)
+            .field("dns_timeout_seconds", &self.dns_timeout_seconds)
             .field("max_wait_seconds", &self.max_wait_seconds)
             .field("verify_timeout_seconds", &self.verify_timeout_seconds)
             .field("verify_concurrency", &self.verify_concurrency)
             .field("resolve_records", &self.resolve_records)
+            .field("cdn_detect", &self.cdn_detect)
+            .field("cdn_collapse", &self.cdn_collapse)
             .field("query_types", &self.query_types)
             .field("silent", &self.silent)
             .field("raw_records", &self.raw_records)
             .field("device", &self.device)
+            .field("transport", &self.transport)
             .field(
                 "progress_callback",
                 &self.progress_callback.as_ref().map(|_| "<callback>"),
@@ -77,17 +89,21 @@ impl Default for SubdomainBruteConfig {
             dictionary_file: None,
             dictionary: None,
             skip_wildcard: false,
-            bandwidth_limit: Some("3M".to_string()),
+            bandwidth_limit: Some("256K".to_string()),
             verify_mode: false,
             max_retries: 5,
-            max_wait_seconds: 300,
+            dns_timeout_seconds: 10,
+            max_wait_seconds: 10,
             verify_timeout_seconds: 10,
             verify_concurrency: 50,
             resolve_records: false,
+            cdn_detect: true,
+            cdn_collapse: true,
             query_types: vec![QueryType::A],
             silent: false,
             raw_records: false,
             device: None,
+            transport: PacketTransport::Ethernet,
             progress_callback: None,
         }
     }

@@ -2,7 +2,7 @@ use log::info;
 use std::fs::File;
 use std::io::Write;
 
-use crate::api::{SubdomainResult, SubdomainScanData};
+use crate::api::{CdnAnalysisOptions, SubdomainResult, SubdomainScanData};
 use crate::handle::{
     AggregatedDiscoveredDomain, DiscoveredDomain, SummaryStats, VerificationResult,
 };
@@ -58,6 +58,16 @@ pub fn export_subdomain_results(
     format: &OutputFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scan_data = SubdomainScanData::from_results(results);
+    export_scan_data(&scan_data, output_path, format)
+}
+
+pub fn export_subdomain_results_with_options(
+    results: &[SubdomainResult],
+    output_path: &str,
+    format: &OutputFormat,
+    cdn_options: CdnAnalysisOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let scan_data = SubdomainScanData::from_results_with_options(results, cdn_options);
     export_scan_data(&scan_data, output_path, format)
 }
 

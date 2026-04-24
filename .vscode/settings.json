@@ -1,4 +1,4 @@
 {
     "editor.minimap.enabled": true,
-    "editor.minimap.autohide": false
+    "editor.minimap.autohide": "none"
 }

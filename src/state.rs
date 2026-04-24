@@ -5,6 +5,7 @@
 
 use crate::handle::{DiscoveredDomain, VerificationResult};
 use crate::local_struct::LocalStruct;
+use crate::resolver_health::ResolverHealth;
 use crate::stack::Stack;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -22,6 +23,8 @@ pub struct BruteForceState {
     pub local_status: Arc<RwLock<LocalStruct>>,
     /// 本地栈结构
     pub local_stack: Arc<RwLock<Stack<usize>>>,
+    /// DNS 解析器健康状态
+    pub resolver_health: Arc<Mutex<ResolverHealth>>,
 }
 
 impl BruteForceState {
@@ -32,6 +35,7 @@ impl BruteForceState {
             verification_results: Arc::new(Mutex::new(Vec::new())),
             local_status: Arc::new(RwLock::new(LocalStruct::new())),
             local_stack: Arc::new(RwLock::new(Stack::new())),
+            resolver_health: Arc::new(Mutex::new(ResolverHealth::new())),
         }
     }
 
@@ -102,9 +106,10 @@ impl BruteForceState {
     pub fn get_timeout_data(
         &self,
         max_length: usize,
+        timeout_seconds: u64,
     ) -> Vec<crate::local_struct::LocalRetryStruct> {
         match self.local_status.write() {
-            Ok(mut local_status) => local_status.get_timeout_data(max_length),
+            Ok(mut local_status) => local_status.get_timeout_data(max_length, timeout_seconds),
             Err(_) => Vec::new(),
         }
     }
@@ -158,6 +163,42 @@ impl BruteForceState {
         if let Ok(mut local_stack) = self.local_stack.write() {
             *local_stack = Stack::new();
         }
+
+        if let Ok(mut resolver_health) = self.resolver_health.lock() {
+            *resolver_health = ResolverHealth::new();
+        }
+    }
+
+    pub fn choose_resolver(&self, resolvers: &[String], routing_key: &str) -> Option<String> {
+        match self.resolver_health.lock() {
+            Ok(mut resolver_health) => resolver_health.choose_resolver(resolvers, routing_key),
+            Err(_) => resolvers.first().cloned(),
+        }
+    }
+
+    pub fn record_resolver_success(&self, resolver: &str, rtt_millis: f64) {
+        if let Ok(mut resolver_health) = self.resolver_health.lock() {
+            resolver_health.record_success(resolver, rtt_millis);
+        }
+    }
+
+    pub fn record_resolver_timeout(&self, resolver: &str) {
+        if let Ok(mut resolver_health) = self.resolver_health.lock() {
+            resolver_health.record_timeout(resolver);
+        }
+    }
+
+    pub fn record_resolver_failure(&self, resolver: &str) {
+        if let Ok(mut resolver_health) = self.resolver_health.lock() {
+            resolver_health.record_failure(resolver);
+        }
+    }
+
+    pub fn current_dns_timeout_seconds(&self, cap_seconds: u64) -> u64 {
+        match self.resolver_health.lock() {
+            Ok(resolver_health) => resolver_health.timeout_seconds(cap_seconds),
+            Err(_) => cap_seconds.max(1),
+        }
     }
 }
 
@@ -184,7 +225,7 @@ mod tests {
             let handle = thread::spawn(move || {
                 let domain = DiscoveredDomain {
                     domain: format!("test{}.example.com", i),
-                    ip: format!("192.168.1.{}", i),
+                    value: format!("192.168.1.{}", i),
                     query_type: crate::QueryType::A,
                     record_type: "A".to_string(),
                     timestamp: chrono::Utc::now().timestamp() as u64,
@@ -211,7 +252,7 @@ mod tests {
 
         let domain1 = DiscoveredDomain {
             domain: "test1.example.com".to_string(),
-            ip: "192.168.1.1".to_string(),
+            value: "192.168.1.1".to_string(),
             query_type: crate::QueryType::A,
             record_type: "A".to_string(),
             timestamp: chrono::Utc::now().timestamp() as u64,
@@ -219,7 +260,7 @@ mod tests {
 
         let domain2 = DiscoveredDomain {
             domain: "test2.example.com".to_string(),
-            ip: "192.168.1.2".to_string(),
+            value: "192.168.1.2".to_string(),
             query_type: crate::QueryType::A,
             record_type: "A".to_string(),
             timestamp: chrono::Utc::now().timestamp() as u64,

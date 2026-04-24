@@ -1,6 +1,6 @@
 use rsubdomain::{
     brute_force_subdomains, export_subdomain_results, run_speed_test, OutputFormat, QueryType,
-    SubdomainBruteConfig, SubdomainBruteEngine, SubdomainResult,
+    PacketTransport, SubdomainBruteConfig, SubdomainBruteEngine, SubdomainResult,
 };
 use std::error::Error;
 
@@ -50,7 +50,7 @@ async fn basic_brute_force() -> Result<(), Box<dyn Error>> {
                 // 只显示前10个
                 println!(
                     "  {} -> {} ({})",
-                    result.domain, result.ip, result.record_type
+                    result.domain, result.value, result.record_type
                 );
             }
         }
@@ -71,14 +71,18 @@ async fn advanced_brute_force() -> Result<(), Box<dyn Error>> {
         bandwidth_limit: Some("5M".to_string()),
         verify_mode: false,
         max_retries: 5,
-        max_wait_seconds: 300,
+        dns_timeout_seconds: 10,
+        max_wait_seconds: 10,
         verify_timeout_seconds: 10,
         verify_concurrency: 50,
         resolve_records: false,
+        cdn_detect: true,
+        cdn_collapse: true,
         query_types: vec![QueryType::A],
         silent: false,
         raw_records: false,
         device: None, // 自动检测网络设备
+        transport: PacketTransport::Ethernet,
         progress_callback: None,
     };
 
@@ -89,7 +93,7 @@ async fn advanced_brute_force() -> Result<(), Box<dyn Error>> {
                 for result in results.iter().take(5) {
                     println!(
                         "  {} -> {} ({})",
-                        result.domain, result.ip, result.record_type
+                        result.domain, result.value, result.record_type
                     );
                 }
             }
@@ -112,14 +116,18 @@ async fn full_featured_brute_force() -> Result<(), Box<dyn Error>> {
         bandwidth_limit: Some("3M".to_string()),
         verify_mode: true, // 启用HTTP/HTTPS验证
         max_retries: 5,
-        max_wait_seconds: 300,
+        dns_timeout_seconds: 10,
+        max_wait_seconds: 10,
         verify_timeout_seconds: 10,
         verify_concurrency: 50,
         resolve_records: true, // 启用DNS记录解析
+        cdn_detect: true,
+        cdn_collapse: true,
         query_types: vec![QueryType::A],
         silent: false,
         raw_records: false,
         device: Some("eth0".to_string()), // 指定网络设备
+        transport: PacketTransport::Ethernet,
         progress_callback: None,
     };
 
@@ -132,7 +140,7 @@ async fn full_featured_brute_force() -> Result<(), Box<dyn Error>> {
                     // 显示验证结果
                     for result in results.iter().take(3) {
                         println!("域名: {}", result.domain);
-                        println!("  IP: {}", result.ip);
+                        println!("  记录值: {}", result.value);
                         println!("  记录类型: {}", result.record_type);
 
                         if let Some(ref verified) = result.verified {
@@ -196,7 +204,7 @@ fn process_results_custom(results: &[SubdomainResult]) {
     for (record_type, domains) in by_type {
         println!("{} 记录 ({} 个):", record_type, domains.len());
         for domain in domains.iter().take(3) {
-            println!("  {} -> {}", domain.domain, domain.ip);
+            println!("  {} -> {}", domain.domain, domain.value);
         }
         if domains.len() > 3 {
             println!("  ... 还有 {} 个", domains.len() - 3);

@@ -114,6 +114,15 @@ cat domains.txt | ./rsubdomain --stdin
 
 # 同时启用验证和解析
 ./rsubdomain -d example.com -v --resolve-records
+
+# 聚合视图中关闭 CDN 识别
+./rsubdomain -d example.com --no-cdn-detect
+
+# 聚合视图中保留 CDN 的全部 A/AAAA 记录
+./rsubdomain -d example.com --resolve-records --no-cdn-collapse
+
+# 输出带 CDN 统计的资产视图
+./rsubdomain -d example.com --resolve-records --summary
 ```
 
 ### 输出和统计
@@ -143,6 +152,43 @@ cat domains.txt | ./rsubdomain --stdin
 ./rsubdomain -d example.com -f wordlist.txt -v --resolve-records --summary -o results.json --format json -e eth0 -b 3M
 ```
 
+## CDN 资产视图
+
+- 默认输出偏向资产归属视角，只展示域名自身的直接记录，不展开 `CNAME -> A/AAAA` 链路。
+- 默认展示的是聚合域名视图；如果需要逐条记录，请使用 `--raw-records`。
+- 命中 CDN 后，聚合域名会标记为 `CDN(confidence): provider`。
+- CDN 命中后，聚合视图默认把 `A/AAAA` 收敛成 1 条代表值，同时保留 `raw_record_count` 作为真实记录数。
+- 如果你要看 CDN 后面的全部入口地址，使用 `--no-cdn-collapse`；如果要完全关闭识别，使用 `--no-cdn-detect`。
+
+### CDN 识别证据
+
+- `CNAME`：高价值别名证据，最适合识别典型 CDN 接入域名。
+- `NS`：权威 DNS 指向 CDN 体系时可直接命中。
+- `PTR`：适合识别直挂 CDN 的 `A/AAAA` 记录，需要 `--resolve-records` 才能补充这类证据。
+- `IP_RANGE`：适合识别没有明显 `PTR` 的 CDN 直挂 IP。
+- `MULTI_A/MULTI_AAAA`：弱信号，只表示一个主机名返回了多个 IP，可能是 CDN，也可能只是负载均衡或多机房。
+
+### CDN 置信度
+
+- `high`：`CNAME/NS` 后缀规则命中，或 `PTR + IP_RANGE` 同时命中。
+- `medium`：仅 `PTR` 或仅 `IP_RANGE` 命中。
+- `low`：仅弱名称模式命中。
+
+### 疑似 CDN
+
+- `has_cdn` 只用于强/中证据命中的明确 CDN 判定。
+- `possible_cdn` 只用于弱信号命中，目前包括 `MULTI_A` 和 `MULTI_AAAA`。
+- `possible_cdn` 不会触发 CDN IP 收敛，也不会计入 `CDN域名数量`。
+
+### CDN 规则文件
+
+- `data/cdn_rules.txt`
+  每行格式：`Provider,suffix:example.cdn.net,contains:.vendor.`
+- `data/cdn_ip_ranges.txt`
+  每行格式：`Provider,203.0.113.0/24`
+- `suffix:` 走严格后缀匹配，避免把相似域名误识别成同一 CDN。
+- `contains:` 只适合少数需要子串命中的模式。
+
 ## 命令行参数详解
 
 | 参数 | 长参数 | 描述 | 默认值 |
@@ -163,10 +209,14 @@ cat domains.txt | ./rsubdomain --stdin
 | `-b` | `--bandwidth` | 带宽限制 (K/M/G) | 3M |
 | `-v` | `--verify` | HTTP/HTTPS验证模式 | - |
 | | `--retry` | DNS查询超时后的最大重试次数 | 5 |
-| | `--wait-seconds` | 发包完成后的最大等待时间（秒） | 300 |
+| | `--wait-seconds` | 发包完成后的最大等待时间（秒） | 10 |
 | | `--verify-timeout` | HTTP/HTTPS验证超时时间（秒） | 10 |
 | | `--verify-concurrency` | HTTP/HTTPS验证并发度 | 50 |
 | | `--resolve-records` | 解析DNS记录 | - |
+| | `--cdn-detect` | 显式开启聚合视图中的 CDN 识别 | true |
+| | `--no-cdn-detect` | 关闭聚合视图中的 CDN 识别 | false |
+| | `--cdn-collapse` | 显式开启 CDN `A/AAAA` 收敛 | true |
+| | `--no-cdn-collapse` | 在聚合视图中保留 CDN 的全部 `A/AAAA` | false |
 | | `--qtype` | 主动发送的查询类型，可逗号分隔 (a/aaaa/cname/mx/ns/txt) | a |
 | `-e` | `--device` | 手动指定网络设备 | 自动检测 |
 | `-o` | `--output` | 输出文件路径 | - |
@@ -178,11 +228,11 @@ cat domains.txt | ./rsubdomain --stdin
 
 ### 标准输出
 ```
-域名                          查询     IP地址                                         记录类型    时间戳
-------------------------------------------------------------------------------------------------------------------------
-www.example.com               A        93.184.216.34                                   A          14:23:45
-mail.example.com              MX       10 mail.example.com                             MX         14:23:46
-ftp.example.com               CNAME    ftp.example.org                                 CNAME      14:23:47
+域名                          标签                        记录类型    记录值
+----------------------------------------------------------------------------------------------------
+www.example.com               CDN(high): Cloudflare       A           104.16.132.229
+mail.example.com              -                           MX          10 mail.example.com
+static.example.com            CDN(medium): Tencent Cloud  CNAME       static.example.com.cdn.dnsv1.com
 ```
 
 ### 验证结果输出
@@ -202,12 +252,21 @@ api.example.com               93.184.216.35   404    N/A    N/A                 
 唯一域名数量: 98
 唯一IP数量: 23
 已验证域名: 45
+CDN域名数量: 18
 存活域名: 32
 
 记录类型分布:
   A: 134
   CNAME: 18
   MX: 4
+
+CDN提供商分布:
+  Cloudflare: 10
+  Tencent Cloud CDN: 8
+
+CDN置信度分布:
+  high: 15
+  medium: 3
 
 IP段分布 (前10个):
   93.184.216.0/24: 12 个IP
@@ -242,7 +301,17 @@ IP段分布 (前10个):
 
 ## 更新日志
 
-### v1.2.13 (最新)
+### v1.2.14 (最新)
+- 🐛 修复大字典扫描结束后主线程栈溢出导致进程 abort 的问题
+- 🐛 修复超时处理和重试关闭阶段的竞态告警噪音
+- ⚡ 将待响应状态从全表扫描改为到期队列，降低大规模扫描 CPU 开销
+- ⚡ 引入基于 RTT 的动态 DNS 超时和解析器健康评分
+- ⚡ 将重试调度调整为首轮发送完成后启动，避免边首发边重试的放大效应
+- ⚡ 为 `raw-records` 增加批量缓冲输出，减少 stdout 反压
+- ⚡ 优化 Ethernet 接收路径，避免无效整包拷贝
+- 📚 更新 CLI、README、示例和库导出说明
+
+### v1.2.13
 - 🐛 修复API中`send_dns_queries`方法参数不匹配问题
 - 🐛 修复带宽限制器创建和使用逻辑
 - 🐛 修复超时域名处理中的变量借用问题
@@ -291,7 +360,7 @@ rsubdomain不仅可以作为命令行工具使用，还可以作为Rust库集成
 ```toml
 [dependencies]
 # 从 crates.io
-rsubdomain = "1.2.13"
+rsubdomain = "1.2.14"
 
 # 或从本地路径 / Git 仓库
 # rsubdomain = { path = "/path/to/rsubdomain" }
@@ -305,7 +374,7 @@ tokio = { version = "1.0", features = ["full"] }
 
 ```toml
 [dependencies]
-rsubdomain = { version = "1.2.13", default-features = false }
+rsubdomain = { version = "1.2.14", default-features = false }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
@@ -332,7 +401,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     println!("发现 {} 个子域名", results.len());
     for result in results.iter().take(5) {
-        println!("  {} -> {}", result.domain, result.ip);
+        println!("  {} -> {}", result.domain, result.value);
     }
     
     Ok(())
@@ -355,10 +424,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bandwidth_limit: Some("5M".to_string()),
         verify_mode: true,      // 启用HTTP/HTTPS验证
         max_retries: 5,
-        max_wait_seconds: 300,
+        max_wait_seconds: 10,
         verify_timeout_seconds: 10,
         verify_concurrency: 50,
         resolve_records: true,  // 启用DNS记录解析
+        cdn_detect: true,       // 启用CDN识别
+        cdn_collapse: true,     // 在聚合视图中收敛CDN多IP
         query_types: vec![QueryType::A, QueryType::Aaaa, QueryType::Cname],
         silent: false,
         raw_records: false,     // 默认按域名聚合展示
@@ -376,7 +447,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 处理结果
     for result in &results {
         println!("域名: {}", result.domain);
-        println!("  IP: {}", result.ip);
+        println!("  记录值: {}", result.value);
         println!("  查询类型: {}", result.query_type);
         println!("  记录类型: {}", result.record_type);
         
@@ -419,6 +490,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `verify_timeout_seconds: u64` - HTTP/HTTPS验证超时时间
 - `verify_concurrency: usize` - HTTP/HTTPS验证并发度
 - `resolve_records: bool` - 是否解析DNS记录
+- `cdn_detect: bool` - 是否在聚合资产视图中识别CDN
+- `cdn_collapse: bool` - 是否在聚合资产视图中收敛CDN的多IP
 - `query_types: Vec<QueryType>` - 主动发送的DNS查询类型
 - `silent: bool` - 静默模式
 - `raw_records: bool` - 是否输出原始逐记录结果
@@ -426,7 +499,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 **`SubdomainResult`** - 暴破结果
 - `domain: String` - 发现的域名
-- `ip: String` - 对应的IP地址
+- `value: String` - 对应的记录值，可能是 IP、CNAME 目标、MX 内容或 TXT 文本
 - `query_type: QueryType` - 主动查询类型
 - `record_type: String` - DNS记录类型
 - `verified: Option<VerifyResult>` - HTTP/HTTPS验证结果
@@ -435,9 +508,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 **`SubdomainScanData`** - 从 `SubdomainResult` 派生出的汇总视图
 - `raw_results: Vec<SubdomainResult>` - 保真原始扫描结果，适合 JSON 导出
 - `discovered_domains: Vec<DiscoveredDomain>` - 可展示/导出的发现结果
-- `aggregated_domains: Vec<AggregatedDiscoveredDomain>` - 按域名聚合后的展示结果
+- `aggregated_domains: Vec<AggregatedDiscoveredDomain>` - 按域名聚合后的展示结果，包含 `has_cdn/cdn_provider/cdn_confidence/cdn_evidence`
 - `verification_results: Vec<VerificationResult>` - HTTP/HTTPS验证结果列表
-- `summary: SummaryStats` - 汇总统计
+- `summary: SummaryStats` - 汇总统计，包含 CDN 数量、提供商分布和置信度分布
 
 #### 主要函数
 
@@ -454,6 +527,16 @@ pub async fn brute_force_subdomains(
     silent: bool,
     device: Option<String>,
 ) -> Result<Vec<SubdomainResult>, Box<dyn std::error::Error>>
+```
+
+**`export_subdomain_results_with_options()`** - 使用自定义 CDN 聚合选项导出结果
+```rust
+pub fn export_subdomain_results_with_options(
+    results: &[SubdomainResult],
+    output_path: &str,
+    format: &OutputFormat,
+    cdn_options: CdnAnalysisOptions,
+) -> Result<(), Box<dyn std::error::Error>>
 ```
 
 **`run_speed_test()`** - 网速测试函数

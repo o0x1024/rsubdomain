@@ -2,7 +2,7 @@ use std::net::Ipv4Addr;
 use std::process::Command;
 use std::str::FromStr;
 
-use super::common::{parse_mac_addr, RouteResolution};
+use super::common::{is_valid_next_hop_mac, parse_mac_addr, RouteResolution};
 
 pub(super) fn resolve_route_to_target(probe_target: Ipv4Addr) -> Result<RouteResolution, String> {
     let output = Command::new("route")
@@ -84,9 +84,38 @@ fn parse_arp_cache_output(output: &str, interface_name: &str) -> Option<pnet::ut
         }
 
         if let Some(mac) = parse_mac_addr(mac_text) {
+            if !is_valid_next_hop_mac(mac) {
+                continue;
+            }
+
             return Some(mac);
         }
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_arp_cache_output;
+
+    #[test]
+    fn parse_arp_cache_output_accepts_zero_oui_unicast_mac() {
+        let output = "? (10.213.192.1) at 0:0:0:0:0:1 on en0 ifscope [ethernet]";
+
+        assert_eq!(
+            parse_arp_cache_output(output, "en0").unwrap().to_string(),
+            "00:00:00:00:00:01"
+        );
+    }
+
+    #[test]
+    fn parse_arp_cache_output_accepts_valid_unicast_mac() {
+        let output = "? (10.213.192.1) at ac:de:48:00:11:22 on en0 ifscope [ethernet]";
+
+        assert_eq!(
+            parse_arp_cache_output(output, "en0").unwrap().to_string(),
+            "ac:de:48:00:11:22"
+        );
+    }
 }

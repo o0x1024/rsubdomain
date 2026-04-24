@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for result in results {
                 println!(
                     "  {} -> {} ({})",
-                    result.domain, result.ip, result.record_type
+                    result.domain, result.value, result.record_type
                 );
             }
         }

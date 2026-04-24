@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
 use crate::device;
+use crate::PacketTransport;
 use crate::send::SendDog;
 use crate::QueryType;
 
@@ -36,7 +37,10 @@ impl SpeedTester {
     }
 
     pub async fn new_with_target(target_ip: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let ether = device::auto_get_devices_for_dns(&[target_ip.to_string()])
+        let ether = device::auto_get_devices_for_dns(
+            &[target_ip.to_string()],
+            PacketTransport::Ethernet,
+        )
             .await
             .map_err(|error| format!("无法为测速初始化原始发包网络设备: {}", error))?;
         let mut rng = rand::thread_rng();

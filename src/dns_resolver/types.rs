@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 
 use trust_dns_resolver::TokioAsyncResolver;
 
@@ -26,4 +28,5 @@ pub struct DnsResolveResult {
 /// DNS解析器
 pub struct DnsResolver {
     pub(super) resolver: TokioAsyncResolver,
+    pub(super) ptr_cache: Arc<Mutex<HashMap<IpAddr, Vec<String>>>>,
 }

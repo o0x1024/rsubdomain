@@ -1,7 +1,7 @@
+use crate::resolver_defaults::default_resolvers;
 #[cfg(feature = "speed-test")]
 use crate::speed_test::SpeedTester;
-use crate::resolver_defaults::default_resolvers;
-use crate::QueryType;
+use crate::{PacketTransport, QueryType};
 
 use super::{SubdomainBruteConfig, SubdomainBruteEngine, SubdomainResult};
 
@@ -30,14 +30,18 @@ pub async fn brute_force_subdomains(
         bandwidth_limit,
         verify_mode,
         max_retries: 5,
-        max_wait_seconds: 300,
+        dns_timeout_seconds: 10,
+        max_wait_seconds: 10,
         verify_timeout_seconds: 10,
         verify_concurrency: 50,
         resolve_records,
+        cdn_detect: true,
+        cdn_collapse: true,
         query_types: vec![QueryType::A],
         silent,
         raw_records: false,
         device,
+        transport: PacketTransport::Ethernet,
         progress_callback: None,
     };
 
@@ -66,14 +70,18 @@ pub async fn brute_force_subdomains_with_dict(
         bandwidth_limit,
         verify_mode,
         max_retries: 5,
-        max_wait_seconds: 300,
+        dns_timeout_seconds: 10,
+        max_wait_seconds: 10,
         verify_timeout_seconds: 10,
         verify_concurrency: 50,
         resolve_records,
+        cdn_detect: true,
+        cdn_collapse: true,
         query_types: vec![QueryType::A],
         silent,
         raw_records: false,
         device,
+        transport: PacketTransport::Ethernet,
         progress_callback: None,
     };
 
@@ -103,14 +111,18 @@ pub async fn brute_force_subdomains_with_config(
         bandwidth_limit,
         verify_mode,
         max_retries: 5,
-        max_wait_seconds: 300,
+        dns_timeout_seconds: 10,
+        max_wait_seconds: 10,
         verify_timeout_seconds: 10,
         verify_concurrency: 50,
         resolve_records,
+        cdn_detect: true,
+        cdn_collapse: true,
         query_types: vec![QueryType::A],
         silent,
         raw_records: false,
         device,
+        transport: PacketTransport::Ethernet,
         progress_callback: None,
     };
 

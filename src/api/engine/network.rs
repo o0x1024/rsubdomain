@@ -24,7 +24,11 @@ impl SubdomainBruteEngine {
         &self,
     ) -> Result<EthTable, Box<dyn std::error::Error>> {
         if let Some(device_name) = &self.config.device {
-            match device::get_device_by_name_for_dns(device_name, &self.config.resolvers) {
+            match device::get_device_by_name_for_dns(
+                device_name,
+                &self.config.resolvers,
+                self.config.transport,
+            ) {
                 Ok(device) => {
                     if !self.config.silent {
                         info!("使用指定网络设备: {}", device_name);
@@ -34,11 +38,14 @@ impl SubdomainBruteEngine {
                 Err(error) => {
                     if !self.config.silent {
                         warn!(
-                            "指定网络设备 {} 不可用于原始以太网发包: {}，尝试自动检测",
-                            device_name, error
+                            "指定网络设备 {} 不可用于当前传输模式 {:?}: {}，尝试自动检测",
+                            device_name, self.config.transport, error
                         );
                     }
-                    device::auto_get_devices_for_dns(&self.config.resolvers)
+                    device::auto_get_devices_for_dns(
+                        &self.config.resolvers,
+                        self.config.transport,
+                    )
                         .await
                         .map_err(|detect_error| {
                             format!(
@@ -50,18 +57,14 @@ impl SubdomainBruteEngine {
                 }
             }
         } else {
-            device::auto_get_devices_for_dns(&self.config.resolvers)
+            device::auto_get_devices_for_dns(&self.config.resolvers, self.config.transport)
                 .await
                 .map_err(Into::into)
         }
     }
 
     pub(super) fn build_bandwidth_limiter(&self) -> Option<BandwidthLimiter> {
-        self.config
-            .bandwidth_limit
-            .as_deref()
-            .and_then(|limit| Self::create_bandwidth_limiter(Some(limit)).ok())
-            .flatten()
+        self._bandwidth_limiter.clone()
     }
 
     pub(super) fn collect_discovered_results(&self) -> Vec<SubdomainResult> {
@@ -70,7 +73,7 @@ impl SubdomainBruteEngine {
             .into_iter()
             .map(|domain| SubdomainResult {
                 domain: domain.domain,
-                ip: domain.ip,
+                value: domain.value,
                 query_type: domain.query_type,
                 record_type: domain.record_type,
                 timestamp: domain.timestamp,
