@@ -26,6 +26,17 @@ macOS 额外说明：
 - 未配置 BPF 设备权限时，通常需要使用 `sudo` 运行。
 - 如果已安装 Wireshark 的 `ChmodBPF`/`chmodbpf` 组件，并且当前用户具备对应的 BPF 设备访问权限，则可以直接使用普通用户运行，无需 `root`。
 
+ChmodBPF长期生效的方法
+
+```
+# 1. 将你的用户加入 access_bpf 组，这一步是赋予“通行证”
+sudo dseditgroup -o edit -a `whoami` -t user access_bpf
+# 2. 手动运行一次权限脚本，立即生效
+sudo "/Library/Application Support/Wireshark/ChmodBPF/ChmodBPF"
+# 3. 确保开机启动项已加载，让权限在重启后依然有效
+sudo launchctl load -w /Library/LaunchDaemons/org.wireshark.ChmodBPF.plist
+```
+
 ### Windows
 需要安装以下组件：
 1. 使用MSVC工具链的Rust版本
